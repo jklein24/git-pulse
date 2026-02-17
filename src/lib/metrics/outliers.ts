@@ -1,0 +1,246 @@
+import { sql, and, gte, lte, eq, isNotNull } from "drizzle-orm";
+import { getDb } from "../db";
+import { pullRequests, prReviews, users } from "../db/schema";
+import { stddev, mean, rollingAverage, formatDate } from "./utils";
+
+const EXCLUDED_LOGINS = new Set([
+  "github-actions", "lightspark-bot", "cursor", "claude",
+  "greptile-apps", "graphite-app", "restamp-bot", "coderabbitai", "dependabot",
+]);
+
+const EXCLUDED_REVIEW_LOGINS = new Set([
+  ...EXCLUDED_LOGINS,
+  "mhrheaume",
+]);
+
+export interface Outlier {
+  login: string;
+  avatarUrl: string | null;
+  metric: string;
+  value: number;
+  teamMean: number;
+  type: "statistical" | "top" | "bottom" | "trend_decline";
+  severity: "info" | "warning";
+}
+
+interface PersonMetric {
+  login: string;
+  avatarUrl: string | null;
+  value: number;
+}
+
+function detectStatisticalOutliers(data: PersonMetric[], metricName: string, threshold = 2): Outlier[] {
+  const values = data.map((d) => d.value);
+  const m = mean(values);
+  const sd = stddev(values);
+  if (sd === 0) return [];
+
+  return data
+    .filter((d) => Math.abs(d.value - m) > threshold * sd)
+    .map((d) => ({
+      login: d.login,
+      avatarUrl: d.avatarUrl,
+      metric: metricName,
+      value: d.value,
+      teamMean: Math.round(m * 10) / 10,
+      type: "statistical" as const,
+      severity: d.value < m ? "warning" as const : "info" as const,
+    }));
+}
+
+function detectTopBottom(data: PersonMetric[], metricName: string, n = 3): Outlier[] {
+  const sorted = [...data].sort((a, b) => b.value - a.value);
+  const m = mean(data.map((d) => d.value));
+  if (sorted.length < 5) return [];
+  const outliers: Outlier[] = [];
+
+  sorted.slice(0, n).forEach((d) => {
+    if (d.value > m * 1.5) {
+      outliers.push({
+        login: d.login,
+        avatarUrl: d.avatarUrl,
+        metric: metricName,
+        value: d.value,
+        teamMean: Math.round(m * 10) / 10,
+        type: "top",
+        severity: "info",
+      });
+    }
+  });
+
+  sorted.slice(-n).forEach((d) => {
+    if (d.value < m * 0.5) {
+      outliers.push({
+        login: d.login,
+        avatarUrl: d.avatarUrl,
+        metric: metricName,
+        value: d.value,
+        teamMean: Math.round(m * 10) / 10,
+        type: "bottom",
+        severity: "warning",
+      });
+    }
+  });
+
+  return outliers;
+}
+
+export async function getOutliers(startDate: number, endDate: number): Promise<Outlier[]> {
+  const db = getDb();
+  const outliers: Outlier[] = [];
+
+  const prsMerged = await db
+    .select({
+      login: users.githubLogin,
+      avatarUrl: users.avatarUrl,
+      count: sql<number>`count(*)`.as("count"),
+    })
+    .from(pullRequests)
+    .innerJoin(users, eq(pullRequests.authorId, users.id))
+    .where(
+      and(
+        eq(pullRequests.state, "MERGED"),
+        gte(pullRequests.mergedAt, startDate),
+        lte(pullRequests.mergedAt, endDate),
+      ),
+    )
+    .groupBy(users.githubLogin);
+
+  const prData: PersonMetric[] = prsMerged
+    .filter((r) => r.count >= 3 && !EXCLUDED_LOGINS.has(r.login))
+    .map((r) => ({
+      login: r.login,
+      avatarUrl: r.avatarUrl,
+      value: r.count,
+    }));
+
+  outliers.push(...detectTopBottom(prData, "PRs Merged"));
+  outliers.push(...detectStatisticalOutliers(prData, "PRs Merged"));
+
+  const reviewCounts = await db
+    .select({
+      login: users.githubLogin,
+      avatarUrl: users.avatarUrl,
+      count: sql<number>`count(*)`.as("count"),
+    })
+    .from(prReviews)
+    .innerJoin(users, eq(prReviews.reviewerId, users.id))
+    .where(
+      and(
+        isNotNull(prReviews.submittedAt),
+        gte(prReviews.submittedAt, startDate),
+        lte(prReviews.submittedAt, endDate),
+      ),
+    )
+    .groupBy(users.githubLogin);
+
+  const reviewData: PersonMetric[] = reviewCounts
+    .filter((r) => r.count >= 3 && !EXCLUDED_REVIEW_LOGINS.has(r.login))
+    .map((r) => ({
+      login: r.login,
+      avatarUrl: r.avatarUrl,
+      value: r.count,
+    }));
+
+  outliers.push(...detectTopBottom(reviewData, "Reviews Given"));
+  outliers.push(...detectStatisticalOutliers(reviewData, "Reviews Given"));
+
+  const linesData = await db
+    .select({
+      login: users.githubLogin,
+      avatarUrl: users.avatarUrl,
+      loc: sql<number>`sum(${pullRequests.filteredAdditions}) + sum(${pullRequests.filteredDeletions})`.as("loc"),
+    })
+    .from(pullRequests)
+    .innerJoin(users, eq(pullRequests.authorId, users.id))
+    .where(
+      and(
+        eq(pullRequests.state, "MERGED"),
+        gte(pullRequests.mergedAt, startDate),
+        lte(pullRequests.mergedAt, endDate),
+      ),
+    )
+    .groupBy(users.githubLogin);
+
+  const locMetrics: PersonMetric[] = linesData
+    .filter((r) => (r.loc ?? 0) >= 10 && !EXCLUDED_LOGINS.has(r.login))
+    .map((r) => ({
+      login: r.login,
+      avatarUrl: r.avatarUrl,
+      value: r.loc ?? 0,
+    }));
+
+  outliers.push(...detectTopBottom(locMetrics, "Lines Written"));
+  outliers.push(...detectStatisticalOutliers(locMetrics, "Lines Written"));
+
+  const seen = new Set<string>();
+  return outliers.filter((o) => {
+    const key = `${o.login}:${o.metric}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
+export async function getTrendOutliers(endDate: number): Promise<Outlier[]> {
+  const oneWeek = 604800;
+  const fourWeeks = 4 * oneWeek;
+  const lastWeekStart = endDate - oneWeek;
+  const rollingStart = endDate - fourWeeks - oneWeek;
+
+  const db = getDb();
+  const outliers: Outlier[] = [];
+
+  const weeklyPRs = await db
+    .select({
+      login: users.githubLogin,
+      avatarUrl: users.avatarUrl,
+      week: sql<number>`(${pullRequests.mergedAt} - (${pullRequests.mergedAt} % 604800))`.as("week"),
+      count: sql<number>`count(*)`.as("count"),
+    })
+    .from(pullRequests)
+    .innerJoin(users, eq(pullRequests.authorId, users.id))
+    .where(
+      and(
+        eq(pullRequests.state, "MERGED"),
+        gte(pullRequests.mergedAt, rollingStart),
+        lte(pullRequests.mergedAt, endDate),
+      ),
+    )
+    .groupBy(users.githubLogin, sql`week`);
+
+  const byPerson: Record<string, { avatarUrl: string | null; weeks: Record<number, number> }> = {};
+  for (const row of weeklyPRs) {
+    if (EXCLUDED_LOGINS.has(row.login)) continue;
+    if (!byPerson[row.login]) {
+      byPerson[row.login] = { avatarUrl: row.avatarUrl, weeks: {} };
+    }
+    byPerson[row.login].weeks[row.week] = row.count;
+  }
+
+  const lastWeekNum = lastWeekStart - (lastWeekStart % oneWeek);
+
+  for (const [login, data] of Object.entries(byPerson)) {
+    const currentWeekValue = data.weeks[lastWeekNum] ?? 0;
+    const priorWeeks = Object.entries(data.weeks)
+      .filter(([w]) => Number(w) < lastWeekNum)
+      .map(([, v]) => v);
+
+    if (priorWeeks.length < 3) continue;
+
+    const rolling = rollingAverage(priorWeeks, 4);
+    if (rolling >= 3 && currentWeekValue < rolling * 0.4) {
+      outliers.push({
+        login,
+        avatarUrl: data.avatarUrl,
+        metric: "PRs Merged (trend decline)",
+        value: currentWeekValue,
+        teamMean: Math.round(rolling * 10) / 10,
+        type: "trend_decline",
+        severity: "warning",
+      });
+    }
+  }
+
+  return outliers;
+}

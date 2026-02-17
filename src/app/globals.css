@@ -1,0 +1,73 @@
+@import "tailwindcss";
+
+:root {
+  --bg-primary: #07090F;
+  --bg-secondary: #0D1220;
+  --bg-tertiary: #141C2E;
+  --bg-hover: #1A2540;
+  --border: #1E2D4A;
+  --border-active: #22D3EE;
+
+  --text-primary: #E8EDF5;
+  --text-secondary: #8899B4;
+  --text-muted: #4A5E80;
+
+  --accent: #22D3EE;
+  --accent-hover: #06B6D4;
+  --accent-glow: rgba(34, 211, 238, 0.12);
+
+  --success: #34D399;
+  --success-dim: rgba(52, 211, 153, 0.12);
+  --warning: #FBBF24;
+  --warning-dim: rgba(251, 191, 36, 0.10);
+  --danger: #F87171;
+  --danger-dim: rgba(248, 113, 113, 0.10);
+
+  --violet: #A78BFA;
+  --orange: #FB923C;
+}
+
+@theme inline {
+  --color-bg-primary: var(--bg-primary);
+  --color-bg-secondary: var(--bg-secondary);
+  --color-bg-tertiary: var(--bg-tertiary);
+  --color-bg-hover: var(--bg-hover);
+  --color-border: var(--border);
+  --color-border-active: var(--border-active);
+
+  --color-text-primary: var(--text-primary);
+  --color-text-secondary: var(--text-secondary);
+  --color-text-muted: var(--text-muted);
+
+  --color-accent: var(--accent);
+  --color-accent-hover: var(--accent-hover);
+  --color-accent-glow: var(--accent-glow);
+
+  --color-success: var(--success);
+  --color-success-dim: var(--success-dim);
+  --color-warning: var(--warning);
+  --color-warning-dim: var(--warning-dim);
+  --color-danger: var(--danger);
+  --color-danger-dim: var(--danger-dim);
+
+  --color-violet: var(--violet);
+  --color-orange: var(--orange);
+
+  --font-display: var(--font-syne);
+  --font-body: var(--font-dm-sans);
+  --font-mono: var(--font-dm-mono);
+}
+
+body {
+  background: var(--bg-primary);
+  color: var(--text-primary);
+}
+
+::selection {
+  background: rgba(34, 211, 238, 0.25);
+  color: #fff;
+}
+
+input[type="date"]::-webkit-calendar-picker-indicator {
+  filter: invert(0.6);
+}
