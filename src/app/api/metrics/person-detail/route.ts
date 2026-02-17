@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { sql, and, gte, lte, eq, or, isNotNull, desc } from "drizzle-orm";
 import { getDb } from "@/lib/db";
 import { pullRequests, users, repos, prReviews } from "@/lib/db/schema";
-import { formatDate } from "@/lib/metrics/utils";
+import { formatDate, MONDAY_OFFSET } from "@/lib/metrics/utils";
 
 export async function GET(request: NextRequest) {
   const { searchParams } = new URL(request.url);
@@ -31,7 +31,7 @@ export async function GET(request: NextRequest) {
 
   const weeklyPrs = await db
     .select({
-      week: sql<number>`(${pullRequests.mergedAt} - (${pullRequests.mergedAt} % 604800))`.as("week"),
+      week: sql<number>`((${pullRequests.mergedAt} + ${MONDAY_OFFSET}) - ((${pullRequests.mergedAt} + ${MONDAY_OFFSET}) % 604800)) - ${MONDAY_OFFSET}`.as("week"),
       count: sql<number>`count(*)`.as("count"),
       additions: sql<number>`sum(${pullRequests.filteredAdditions})`.as("additions"),
       deletions: sql<number>`sum(${pullRequests.filteredDeletions})`.as("deletions"),
@@ -51,7 +51,7 @@ export async function GET(request: NextRequest) {
 
   const weeklyReviews = await db
     .select({
-      week: sql<number>`(${prReviews.submittedAt} - (${prReviews.submittedAt} % 604800))`.as("week"),
+      week: sql<number>`((${prReviews.submittedAt} + ${MONDAY_OFFSET}) - ((${prReviews.submittedAt} + ${MONDAY_OFFSET}) % 604800)) - ${MONDAY_OFFSET}`.as("week"),
       count: sql<number>`count(*)`.as("count"),
     })
     .from(prReviews)

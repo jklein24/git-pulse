@@ -1,7 +1,7 @@
 import { sql, and, gte, lte, eq, isNotNull } from "drizzle-orm";
 import { getDb } from "../db";
 import { pullRequests, prReviews, users } from "../db/schema";
-import { stddev, mean, rollingAverage, formatDate } from "./utils";
+import { stddev, mean, rollingAverage, formatDate, MONDAY_OFFSET } from "./utils";
 
 const EXCLUDED_LOGINS = new Set([
   "github-actions", "lightspark-bot", "cursor", "claude",
@@ -195,7 +195,7 @@ export async function getTrendOutliers(endDate: number): Promise<Outlier[]> {
     .select({
       login: users.githubLogin,
       avatarUrl: users.avatarUrl,
-      week: sql<number>`(${pullRequests.mergedAt} - (${pullRequests.mergedAt} % 604800))`.as("week"),
+      week: sql<number>`((${pullRequests.mergedAt} + ${MONDAY_OFFSET}) - ((${pullRequests.mergedAt} + ${MONDAY_OFFSET}) % 604800)) - ${MONDAY_OFFSET}`.as("week"),
       count: sql<number>`count(*)`.as("count"),
     })
     .from(pullRequests)
@@ -218,7 +218,7 @@ export async function getTrendOutliers(endDate: number): Promise<Outlier[]> {
     byPerson[row.login].weeks[row.week] = row.count;
   }
 
-  const lastWeekNum = lastWeekStart - (lastWeekStart % oneWeek);
+  const lastWeekNum = ((lastWeekStart + MONDAY_OFFSET) - ((lastWeekStart + MONDAY_OFFSET) % oneWeek)) - MONDAY_OFFSET;
 
   for (const [login, data] of Object.entries(byPerson)) {
     const currentWeekValue = data.weeks[lastWeekNum] ?? 0;

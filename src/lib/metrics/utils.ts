@@ -40,9 +40,11 @@ export function startOfWeek(unix: number): number {
   const d = new Date(unix * 1000);
   d.setUTCHours(0, 0, 0, 0);
   const day = d.getUTCDay();
-  d.setUTCDate(d.getUTCDate() - day);
+  d.setUTCDate(d.getUTCDate() - ((day + 6) % 7));
   return Math.floor(d.getTime() / 1000);
 }
+
+export const MONDAY_OFFSET = 259200;
 
 export function formatDate(unix: number): string {
   return new Date(unix * 1000).toISOString().split("T")[0];

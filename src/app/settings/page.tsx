@@ -298,7 +298,7 @@ export default function SettingsPage() {
                     </button>
                     <button
                       onClick={() => removeRepo(repo.id)}
-                      disabled={removingRepos.has(repo.id) || syncingRepos.has(repo.id)}
+                      disabled={removingRepos.has(repo.id) || syncingRepos.size > 0}
                       className="text-danger/60 hover:text-danger text-xs font-display font-semibold transition-colors cursor-pointer disabled:cursor-not-allowed disabled:opacity-50"
                     >
                       {removingRepos.has(repo.id) ? (

@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
 import { useDateRange } from "@/components/layout/DateContext";
 
 interface Outlier {
@@ -44,6 +45,7 @@ const TYPE_STYLES: Record<string, { badge: string; dot: string; icon: string }> 
 };
 
 export default function OutliersPage() {
+  const router = useRouter();
   const { startDate, endDate } = useDateRange();
   const [outliers, setOutliers] = useState<Outlier[]>([]);
   const [loading, setLoading] = useState(true);
@@ -100,7 +102,7 @@ export default function OutliersPage() {
                   </thead>
                   <tbody>
                     {items.map((o, i) => (
-                      <tr key={i} className="border-b border-border/40 hover:bg-bg-tertiary/50 transition-colors">
+                      <tr key={i} onClick={() => router.push(`/person/${o.login}`)} className="border-b border-border/40 hover:bg-bg-tertiary/50 transition-colors cursor-pointer">
                         <td className="px-4 py-3">
                           <div className="flex items-center gap-2.5">
                             {o.avatarUrl && (

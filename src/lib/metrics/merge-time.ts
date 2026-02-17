@@ -1,7 +1,7 @@
 import { sql, and, gte, lte, eq, isNotNull } from "drizzle-orm";
 import { getDb } from "../db";
 import { pullRequests, users } from "../db/schema";
-import { median, percentile, mean as meanFn, formatDate, hoursFromSeconds } from "./utils";
+import { median, percentile, mean as meanFn, formatDate, hoursFromSeconds, MONDAY_OFFSET } from "./utils";
 
 export async function getMergeTimePerPerson(startDate: number, endDate: number) {
   const db = getDb();
@@ -49,7 +49,7 @@ export async function getMergeTimeTrend(startDate: number, endDate: number) {
 
   const rows = await db
     .select({
-      week: sql<number>`(${pullRequests.mergedAt} - (${pullRequests.mergedAt} % 604800))`.as("week"),
+      week: sql<number>`((${pullRequests.mergedAt} + ${MONDAY_OFFSET}) - ((${pullRequests.mergedAt} + ${MONDAY_OFFSET}) % 604800)) - ${MONDAY_OFFSET}`.as("week"),
       publishedAt: pullRequests.publishedAt,
       mergedAt: pullRequests.mergedAt,
     })

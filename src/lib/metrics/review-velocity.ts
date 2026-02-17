@@ -1,7 +1,7 @@
 import { sql, and, gte, lte, eq, isNotNull, ne } from "drizzle-orm";
 import { getDb } from "../db";
 import { pullRequests, prReviews, users } from "../db/schema";
-import { median, formatDate, hoursFromSeconds } from "./utils";
+import { median, formatDate, hoursFromSeconds, MONDAY_OFFSET } from "./utils";
 
 export async function getReviewVelocityTrend(startDate: number, endDate: number) {
   const db = getDb();
@@ -53,7 +53,7 @@ export async function getReviewVelocityTrend(startDate: number, endDate: number)
     const velocity = firstNonSelf.submittedAt - pr.publishedAt;
     if (velocity < 0) continue;
 
-    const week = pr.mergedAt - (pr.mergedAt % 604800);
+    const week = ((pr.mergedAt + MONDAY_OFFSET) - ((pr.mergedAt + MONDAY_OFFSET) % 604800)) - MONDAY_OFFSET;
     if (!byWeek[week]) byWeek[week] = [];
     byWeek[week].push(velocity);
   }

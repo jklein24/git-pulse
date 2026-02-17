@@ -1,7 +1,7 @@
 import { sql, and, gte, lte, eq, ne, isNotNull } from "drizzle-orm";
 import { getDb } from "../db";
 import { pullRequests, prFiles, settings } from "../db/schema";
-import { formatDate } from "./utils";
+import { formatDate, MONDAY_OFFSET } from "./utils";
 
 async function getChurnWindowDays(): Promise<number> {
   const db = getDb();
@@ -61,7 +61,7 @@ export async function getChurnRate(startDate: number, endDate: number) {
   for (let i = 0; i < mergedPRs.length; i++) {
     const pr = mergedPRs[i];
     const prFileList = filesByPr[pr.prId] || [];
-    const week = pr.mergedAt! - (pr.mergedAt! % 604800);
+    const week = ((pr.mergedAt! + MONDAY_OFFSET) - ((pr.mergedAt! + MONDAY_OFFSET) % 604800)) - MONDAY_OFFSET;
 
     if (!byWeek[week]) byWeek[week] = { churned: 0, total: 0 };
 
