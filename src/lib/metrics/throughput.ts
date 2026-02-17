@@ -44,13 +44,15 @@ export async function getTeamThroughput(startDate: number, endDate: number) {
   return rows.map((r) => {
     const weekKey = formatDate(r.week);
     const contributors = contributorsByWeek.get(weekKey) || 1;
+    const loc = (r.additions ?? 0) + (r.deletions ?? 0);
     return {
       week: weekKey,
       prCount: r.prCount,
       additions: r.additions ?? 0,
       deletions: r.deletions ?? 0,
-      loc: (r.additions ?? 0) + (r.deletions ?? 0),
+      loc,
       prsPerContributor: Math.round((r.prCount / contributors) * 10) / 10,
+      linesPerContributor: Math.round(loc / contributors),
     };
   });
 }

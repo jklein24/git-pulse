@@ -18,6 +18,7 @@ interface ThroughputData {
   prCount: number;
   loc: number;
   prsPerContributor?: number;
+  linesPerContributor?: number;
 }
 
 interface ThroughputChartProps {
@@ -34,6 +35,7 @@ const CHART_COLORS = {
   area: "#A78BFA",
   areaStroke: "#8B5CF6",
   perContributor: "#F59E0B",
+  linesPerContributor: "#10B981",
 };
 
 export default function ThroughputChart({ data, onWeekClick }: ThroughputChartProps) {
@@ -51,6 +53,7 @@ export default function ThroughputChart({ data, onWeekClick }: ThroughputChartPr
           <XAxis dataKey="week" tick={{ fontSize: 11, fill: CHART_COLORS.axis, fontFamily: "var(--font-dm-mono)" }} axisLine={{ stroke: CHART_COLORS.grid }} tickLine={false} />
           <YAxis yAxisId="left" tick={{ fontSize: 11, fill: CHART_COLORS.axis, fontFamily: "var(--font-dm-mono)" }} axisLine={false} tickLine={false} />
           <YAxis yAxisId="perContrib" hide />
+          <YAxis yAxisId="linesPerContrib" hide />
           <YAxis yAxisId="right" orientation="right" tick={{ fontSize: 11, fill: CHART_COLORS.axis, fontFamily: "var(--font-dm-mono)" }} axisLine={false} tickLine={false} />
           <Tooltip
             contentStyle={{ background: CHART_COLORS.tooltipBg, border: `1px solid ${CHART_COLORS.tooltipBorder}`, borderRadius: 8, fontSize: 12, fontFamily: "var(--font-dm-mono)", color: "#E8EDF5" }}
@@ -70,6 +73,7 @@ export default function ThroughputChart({ data, onWeekClick }: ThroughputChartPr
             onClick={onWeekClick ? (entry: any) => { if (entry?.payload?.week) onWeekClick(entry.payload.week); } : undefined}
           />
           <Line yAxisId="perContrib" type="monotone" dataKey="prsPerContributor" name="PRs / Contributor" stroke={CHART_COLORS.perContributor} strokeWidth={2} dot={{ r: 3, fill: CHART_COLORS.perContributor }} />
+          <Line yAxisId="linesPerContrib" type="monotone" dataKey="linesPerContributor" name="Lines / Contributor" stroke={CHART_COLORS.linesPerContributor} strokeWidth={2} dot={{ r: 3, fill: CHART_COLORS.linesPerContributor }} strokeDasharray="5 3" />
           <Area yAxisId="right" type="monotone" dataKey="loc" name="Lines of Code" fill="url(#locGrad)" stroke={CHART_COLORS.areaStroke} strokeWidth={2} fillOpacity={1} />
         </ComposedChart>
       </ResponsiveContainer>

@@ -10,6 +10,7 @@ import ReviewLoadChart from "@/components/charts/ReviewLoadChart";
 import LinesChart from "@/components/charts/LinesChart";
 import ChurnChart from "@/components/charts/ChurnChart";
 import AvgPrSizeChart from "@/components/charts/AvgPrSizeChart";
+import ReviewIterationsChart from "@/components/charts/ReviewIterationsChart";
 
 function InfoTooltip({ text }: { text: string }) {
   return (
@@ -25,12 +26,13 @@ function InfoTooltip({ text }: { text: string }) {
 export default function TrendsPage() {
   const router = useRouter();
   const { startDate, endDate } = useDateRange();
-  const [throughput, setThroughput] = useState<Array<{ week: string; prCount: number; loc: number; prsPerContributor: number }>>([]);
+  const [throughput, setThroughput] = useState<Array<{ week: string; prCount: number; loc: number; prsPerContributor: number; linesPerContributor: number }>>([]);
   const [mergeTime, setMergeTime] = useState<Array<{ week: string; p50: number; p75: number; p90: number }>>([]);
   const [reviewVelocity, setReviewVelocity] = useState<Array<{ week: string; medianHours: number }>>([]);
   const [reviewLoad, setReviewLoad] = useState<Array<{ login: string; reviewCount: number }>>([]);
   const [lines, setLines] = useState<Array<{ login: string; additions: number; deletions: number }>>([]);
   const [churn, setChurn] = useState<Array<{ week: string; rate: number }>>([]);
+  const [reviewIterations, setReviewIterations] = useState<Array<{ week: string; medianIterations: number; avgIterations: number; prCount: number }>>([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -44,13 +46,15 @@ export default function TrendsPage() {
       fetch(`/api/metrics/review-load?${qs}`).then((r) => r.json()),
       fetch(`/api/metrics/lines?${qs}`).then((r) => r.json()),
       fetch(`/api/metrics/churn?${qs}`).then((r) => r.json()),
-    ]).then(([tp, mt, rv, rl, ln, ch]) => {
+      fetch(`/api/metrics/review-iterations?${qs}`).then((r) => r.json()),
+    ]).then(([tp, mt, rv, rl, ln, ch, ri]) => {
       setThroughput(tp.teamThroughput || []);
       setMergeTime(mt.mergeTimeTrend || []);
       setReviewVelocity(rv.reviewVelocityTrend || []);
       setReviewLoad(rl.reviewLoad || []);
       setLines(ln.linesPerPerson || []);
       setChurn(ch.churnRate || []);
+      setReviewIterations(ri.reviewIterationsTrend || []);
       setLoading(false);
     });
   }, [startDate, endDate]);
@@ -106,6 +110,15 @@ export default function TrendsPage() {
           <span className="ml-2 text-xs font-mono text-text-muted">median hours · human reviewers only</span>
         </h2>
         <ReviewVelocityChart data={reviewVelocity} />
+      </section>
+
+      <section>
+        <h2 className="text-base font-display font-semibold mb-4 text-text-secondary">
+          Review Iterations
+          <InfoTooltip text="Median and average number of human review submissions per PR before merge. Fewer iterations suggests code is more review-ready on first submission. Bot reviewers are excluded." />
+          <span className="ml-2 text-xs font-mono text-text-muted">reviews per PR</span>
+        </h2>
+        <ReviewIterationsChart data={reviewIterations} />
       </section>
 
       <section>
