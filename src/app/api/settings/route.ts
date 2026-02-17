@@ -8,12 +8,14 @@ import { recomputeFilteredStats } from "@/lib/github/sync";
 export async function GET() {
   const db = getDb();
   const rows = await db.select().from(settings);
-  const result: Record<string, string | null> = {};
+  const result: Record<string, string | boolean | null> = {};
   for (const row of rows) {
+    if (row.key === "oauth_state") continue;
     result[row.key] = row.key === "github_pat" && row.value
       ? `${"*".repeat(Math.max(0, row.value.length - 4))}${row.value.slice(-4)}`
       : row.value;
   }
+  result._oauthConfigured = !!(process.env.GITHUB_CLIENT_ID && process.env.GITHUB_CLIENT_SECRET);
   return NextResponse.json(result);
 }
 
