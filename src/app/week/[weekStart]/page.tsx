@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { useParams } from "next/navigation";
 import Link from "next/link";
+import ReactMarkdown from "react-markdown";
 import PrsByRepoChart from "@/components/charts/PrsByRepoChart";
 
 interface WeekPR {
@@ -47,12 +48,37 @@ export default function WeekDetailPage() {
   const [leaderboard, setLeaderboard] = useState<LeaderboardEntry[]>([]);
   const [prsByRepo, setPrsByRepo] = useState<Array<{ repo: string; opened: number; merged: number }>>([]);
   const [loading, setLoading] = useState(true);
+  const [summary, setSummary] = useState<string | null>(null);
+  const [summaryLoading, setSummaryLoading] = useState(false);
+  const [summaryError, setSummaryError] = useState<string | null>(null);
+  const [hasCached, setHasCached] = useState(false);
 
   const weekLabel = new Date(weekStart * 1000).toLocaleDateString("en-US", {
     month: "long",
     day: "numeric",
     year: "numeric",
   });
+
+  function fetchSummary(force: boolean) {
+    setSummaryLoading(true);
+    setSummaryError(null);
+    fetch("/api/ai/week-summary", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ weekStart, force }),
+    })
+      .then((r) => r.json())
+      .then((data) => {
+        if (data.error) {
+          setSummaryError(data.error);
+        } else {
+          setSummary(data.summary);
+          setHasCached(true);
+        }
+      })
+      .catch((err) => setSummaryError(err.message))
+      .finally(() => setSummaryLoading(false));
+  }
 
   useEffect(() => {
     fetch(`/api/metrics/week-detail?weekStart=${weekStart}`)
@@ -63,6 +89,7 @@ export default function WeekDetailPage() {
         setPrsByRepo(data.prsByRepo || []);
         setLoading(false);
       });
+    fetchSummary(false);
   }, [weekStart]);
 
   if (loading) {
@@ -93,6 +120,63 @@ export default function WeekDetailPage() {
           {prs.length} PRs merged
         </span>
       </div>
+
+      <section>
+        <div className="flex items-center justify-between mb-3">
+          <h2 className="text-base font-display font-semibold text-text-secondary">AI Summary</h2>
+          {hasCached && !summaryLoading && (
+            <button
+              onClick={() => fetchSummary(true)}
+              className="text-xs text-text-muted hover:text-accent transition-colors"
+            >
+              Regenerate
+            </button>
+          )}
+        </div>
+        {summaryLoading ? (
+          <div className="bg-bg-secondary rounded-xl border border-border p-5">
+            <div className="flex items-center gap-3 text-text-muted text-sm">
+              <span className="w-4 h-4 border-2 border-text-muted border-t-accent rounded-full animate-spin" />
+              Generating summary...
+            </div>
+          </div>
+        ) : summaryError ? (
+          <div className="bg-bg-secondary rounded-xl border border-border p-5">
+            <p className="text-sm text-danger/80 mb-3">{summaryError}</p>
+            <button
+              onClick={() => fetchSummary(false)}
+              className="text-xs text-accent hover:text-accent-hover transition-colors"
+            >
+              Try again
+            </button>
+          </div>
+        ) : summary ? (
+          <div className="bg-bg-secondary rounded-xl border border-border p-5">
+            <div className="text-sm text-text-secondary leading-relaxed">
+              <ReactMarkdown
+                components={{
+                  p: (props) => <p className="my-1.5" {...props} />,
+                  ul: (props) => <ul className="list-disc pl-4 my-1.5 space-y-1" {...props} />,
+                  ol: (props) => <ol className="list-decimal pl-4 my-1.5 space-y-1" {...props} />,
+                  strong: (props) => <strong className="font-semibold text-text-primary" {...props} />,
+                }}
+              >
+                {summary}
+              </ReactMarkdown>
+            </div>
+          </div>
+        ) : (
+          <div className="bg-bg-secondary rounded-xl border border-border p-5">
+            <p className="text-sm text-text-muted mb-3">Generate an AI-powered summary of this week&apos;s pull requests.</p>
+            <button
+              onClick={() => fetchSummary(false)}
+              className="px-3 py-1.5 text-xs font-medium bg-accent/10 text-accent border border-accent/20 rounded-lg hover:bg-accent/20 transition-colors"
+            >
+              Generate Summary
+            </button>
+          </div>
+        )}
+      </section>
 
       <section>
         <h2 className="text-base font-display font-semibold mb-4 text-text-secondary">Leaderboard</h2>

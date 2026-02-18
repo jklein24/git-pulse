@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { Syne, DM_Sans, DM_Mono } from "next/font/google";
 import "./globals.css";
 import AppShell from "@/components/layout/AppShell";
+import AskAI from "@/components/AskAI";
 
 const syne = Syne({
   variable: "--font-syne",
@@ -37,6 +38,7 @@ export default function RootLayout({
         className={`${syne.variable} ${dmSans.variable} ${dmMono.variable} font-body antialiased`}
       >
         <AppShell>{children}</AppShell>
+        <AskAI />
       </body>
     </html>
   );
