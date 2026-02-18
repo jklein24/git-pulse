@@ -3,6 +3,7 @@
 import Sidebar from "./Sidebar";
 import Header from "./Header";
 import { DateProvider, useDateRange } from "./DateContext";
+import { SettingsProvider } from "./SettingsContext";
 
 function AppShellInner({ children }: { children: React.ReactNode }) {
   const { startDate, endDate, setRange } = useDateRange();
@@ -21,7 +22,9 @@ function AppShellInner({ children }: { children: React.ReactNode }) {
 export default function AppShell({ children }: { children: React.ReactNode }) {
   return (
     <DateProvider>
-      <AppShellInner>{children}</AppShellInner>
+      <SettingsProvider>
+        <AppShellInner>{children}</AppShellInner>
+      </SettingsProvider>
     </DateProvider>
   );
 }

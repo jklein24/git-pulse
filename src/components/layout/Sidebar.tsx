@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useState } from "react";
+import { useSettings } from "./SettingsContext";
 
 function DashboardIcon({ className }: { className?: string }) {
   return (
@@ -77,9 +78,16 @@ const NAV_ITEMS = [
   { href: "/settings", label: "Settings", Icon: GearIcon },
 ];
 
+const HIDDEN_WHEN_INDIVIDUAL = ["/leaderboard", "/outliers"];
+
 export default function Sidebar() {
   const pathname = usePathname();
   const [collapsed, setCollapsed] = useState(false);
+  const { hideIndividualMetrics } = useSettings();
+
+  const visibleItems = hideIndividualMetrics
+    ? NAV_ITEMS.filter((item) => !HIDDEN_WHEN_INDIVIDUAL.includes(item.href))
+    : NAV_ITEMS;
 
   return (
     <aside
@@ -114,7 +122,7 @@ export default function Sidebar() {
       </div>
 
       <nav className="flex-1 py-3 space-y-0.5 px-2">
-        {NAV_ITEMS.map((item) => {
+        {visibleItems.map((item) => {
           const active = pathname.startsWith(item.href);
           return (
             <Link

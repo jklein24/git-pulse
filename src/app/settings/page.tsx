@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
+import { useSettings } from "@/components/layout/SettingsContext";
 
 interface Repo {
   id: number;
@@ -49,6 +50,8 @@ export default function SettingsPage() {
   const [syncJobs, setSyncJobs] = useState<SyncJob[]>([]);
   const [syncingRepos, setSyncingRepos] = useState<Set<number>>(new Set());
   const [removingRepos, setRemovingRepos] = useState<Set<number>>(new Set());
+
+  const { hideIndividualMetrics, setHideIndividualMetrics } = useSettings();
 
   const hasToken = pat.length > 0;
 
@@ -314,6 +317,34 @@ export default function SettingsPage() {
             </tbody>
           </table>
         )}
+      </section>
+
+      <section className="bg-bg-secondary rounded-xl border border-border p-6 space-y-4">
+        <h2 className="text-[11px] font-display font-semibold uppercase tracking-widest text-text-muted">
+          Privacy
+        </h2>
+        <div className="flex items-center justify-between">
+          <div>
+            <p className="text-sm text-text-primary font-medium">Hide individual metrics</p>
+            <p className="text-xs text-text-muted mt-0.5">
+              Hides per-person breakdowns like leaderboards and outlier alerts across the dashboard
+            </p>
+          </div>
+          <button
+            role="switch"
+            aria-checked={hideIndividualMetrics}
+            onClick={() => setHideIndividualMetrics(!hideIndividualMetrics)}
+            className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ${
+              hideIndividualMetrics ? "bg-accent" : "bg-bg-tertiary"
+            }`}
+          >
+            <span
+              className={`pointer-events-none inline-block h-5 w-5 rounded-full bg-white shadow-sm transition-transform duration-200 ${
+                hideIndividualMetrics ? "translate-x-5" : "translate-x-0"
+              }`}
+            />
+          </button>
+        </div>
       </section>
 
       <section className="bg-bg-secondary rounded-xl border border-border p-6 space-y-4">

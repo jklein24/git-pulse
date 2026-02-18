@@ -5,6 +5,7 @@ import { useParams } from "next/navigation";
 import Link from "next/link";
 import ReactMarkdown from "react-markdown";
 import PrsByRepoChart from "@/components/charts/PrsByRepoChart";
+import { useSettings } from "@/components/layout/SettingsContext";
 
 interface WeekPR {
   number: number;
@@ -52,6 +53,8 @@ export default function WeekDetailPage() {
   const [summaryLoading, setSummaryLoading] = useState(false);
   const [summaryError, setSummaryError] = useState<string | null>(null);
   const [hasCached, setHasCached] = useState(false);
+
+  const { hideIndividualMetrics } = useSettings();
 
   const weekLabel = new Date(weekStart * 1000).toLocaleDateString("en-US", {
     month: "long",
@@ -178,43 +181,45 @@ export default function WeekDetailPage() {
         )}
       </section>
 
-      <section>
-        <h2 className="text-base font-display font-semibold mb-4 text-text-secondary">Leaderboard</h2>
-        {leaderboard.length === 0 ? (
-          <div className="text-text-muted text-sm">No data for this week.</div>
-        ) : (
-          <div className="bg-bg-secondary rounded-xl border border-border overflow-hidden">
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="text-left text-[11px] font-display font-semibold text-text-muted uppercase tracking-widest border-b border-border">
-                  <th className="px-4 py-3 w-12">#</th>
-                  <th className="px-4 py-3">Engineer</th>
-                  <th className="px-4 py-3 text-right">PRs Merged</th>
-                </tr>
-              </thead>
-              <tbody>
-                {leaderboard.map((entry, idx) => (
-                  <tr
-                    key={entry.login}
-                    className="border-b border-border/40 hover:bg-bg-tertiary/50 transition-colors"
-                  >
-                    <td className="px-4 py-3">{rankBadge(idx)}</td>
-                    <td className="px-4 py-3">
-                      <div className="flex items-center gap-2.5">
-                        {entry.avatarUrl && (
-                          <img src={entry.avatarUrl} alt="" className="w-6 h-6 rounded-full ring-1 ring-border" />
-                        )}
-                        <span className="font-medium text-text-primary">{entry.login}</span>
-                      </div>
-                    </td>
-                    <td className="px-4 py-3 text-right font-mono text-text-primary">{entry.prCount}</td>
+      {!hideIndividualMetrics && (
+        <section>
+          <h2 className="text-base font-display font-semibold mb-4 text-text-secondary">Leaderboard</h2>
+          {leaderboard.length === 0 ? (
+            <div className="text-text-muted text-sm">No data for this week.</div>
+          ) : (
+            <div className="bg-bg-secondary rounded-xl border border-border overflow-hidden">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="text-left text-[11px] font-display font-semibold text-text-muted uppercase tracking-widest border-b border-border">
+                    <th className="px-4 py-3 w-12">#</th>
+                    <th className="px-4 py-3">Engineer</th>
+                    <th className="px-4 py-3 text-right">PRs Merged</th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
-      </section>
+                </thead>
+                <tbody>
+                  {leaderboard.map((entry, idx) => (
+                    <tr
+                      key={entry.login}
+                      className="border-b border-border/40 hover:bg-bg-tertiary/50 transition-colors"
+                    >
+                      <td className="px-4 py-3">{rankBadge(idx)}</td>
+                      <td className="px-4 py-3">
+                        <div className="flex items-center gap-2.5">
+                          {entry.avatarUrl && (
+                            <img src={entry.avatarUrl} alt="" className="w-6 h-6 rounded-full ring-1 ring-border" />
+                          )}
+                          <span className="font-medium text-text-primary">{entry.login}</span>
+                        </div>
+                      </td>
+                      <td className="px-4 py-3 text-right font-mono text-text-primary">{entry.prCount}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </section>
+      )}
 
       <section>
         <h2 className="text-base font-display font-semibold mb-4 text-text-secondary">PRs by Repository</h2>

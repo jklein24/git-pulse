@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { useDateRange } from "@/components/layout/DateContext";
+import { useSettings } from "@/components/layout/SettingsContext";
 import MetricCard from "@/components/layout/MetricCard";
 import ThroughputChart from "@/components/charts/ThroughputChart";
 
@@ -37,6 +38,7 @@ function getCurrentWeekStart(): number {
 export default function DashboardPage() {
   const router = useRouter();
   const { startDate, endDate } = useDateRange();
+  const { hideIndividualMetrics } = useSettings();
   const [throughput, setThroughput] = useState<ThroughputData[]>([]);
   const [outliers, setOutliers] = useState<OutlierAlert[]>([]);
   const [loading, setLoading] = useState(true);
@@ -113,7 +115,7 @@ export default function DashboardPage() {
     <div className="space-y-6">
       <h1 className="text-2xl font-display font-bold tracking-tight">Dashboard</h1>
 
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+      <div className={`grid grid-cols-1 sm:grid-cols-2 ${hideIndividualMetrics ? "lg:grid-cols-3" : "lg:grid-cols-4"} gap-4`}>
         <MetricCard
           title="PRs Merged"
           value={totalPRs}
@@ -133,11 +135,13 @@ export default function DashboardPage() {
           sparklineData={throughput.map((w) => ({ value: w.additions }))}
           accentColor="#34D399"
         />
-        <MetricCard
-          title="Outlier Alerts"
-          value={warningOutliers.length}
-          accentColor="#FBBF24"
-        />
+        {!hideIndividualMetrics && (
+          <MetricCard
+            title="Outlier Alerts"
+            value={warningOutliers.length}
+            accentColor="#FBBF24"
+          />
+        )}
       </div>
 
       <section>
@@ -203,7 +207,7 @@ export default function DashboardPage() {
         )}
       </section>
 
-      {topOutliers.length > 0 && (
+      {!hideIndividualMetrics && topOutliers.length > 0 && (
         <div className="bg-bg-secondary border border-success/15 rounded-xl p-5 space-y-3">
           <div className="flex items-center gap-2">
             <div className="w-1.5 h-1.5 rounded-full bg-success shadow-[0_0_6px_rgba(52,211,153,0.5)]" />
@@ -220,7 +224,7 @@ export default function DashboardPage() {
         </div>
       )}
 
-      {warningOutliers.length > 0 && (
+      {!hideIndividualMetrics && warningOutliers.length > 0 && (
         <div className="bg-warning-dim border border-warning/15 rounded-xl p-5 space-y-3">
           <div className="flex items-center gap-2">
             <div className="w-1.5 h-1.5 rounded-full bg-warning shadow-[0_0_6px_rgba(251,191,36,0.5)]" />
