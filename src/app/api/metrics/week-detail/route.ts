@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { and, eq, gte, lt, sql } from "drizzle-orm";
+import { and, eq, gte, lt, lte, or, sql } from "drizzle-orm";
 import { getDb } from "@/lib/db";
 import { pullRequests, users, repos } from "@/lib/db/schema";
 
@@ -55,5 +55,52 @@ export async function GET(request: NextRequest) {
     .groupBy(users.githubLogin, users.avatarUrl)
     .orderBy(sql`pr_count desc`);
 
-  return NextResponse.json({ prs, leaderboard });
+  const mergedByRepo = await db
+    .select({
+      repoFullName: repos.fullName,
+      count: sql<number>`count(*)`.as("count"),
+    })
+    .from(pullRequests)
+    .innerJoin(repos, eq(pullRequests.repoId, repos.id))
+    .where(
+      and(
+        eq(pullRequests.state, "MERGED"),
+        gte(pullRequests.mergedAt, weekStart),
+        lt(pullRequests.mergedAt, weekEnd),
+      ),
+    )
+    .groupBy(repos.fullName)
+    .orderBy(sql`count desc`);
+
+  const openedByRepo = await db
+    .select({
+      repoFullName: repos.fullName,
+      count: sql<number>`count(*)`.as("count"),
+    })
+    .from(pullRequests)
+    .innerJoin(repos, eq(pullRequests.repoId, repos.id))
+    .where(
+      and(
+        gte(pullRequests.createdAt, weekStart),
+        lt(pullRequests.createdAt, weekEnd),
+      ),
+    )
+    .groupBy(repos.fullName)
+    .orderBy(sql`count desc`);
+
+  const repoNames = new Set([
+    ...mergedByRepo.map((r) => r.repoFullName),
+    ...openedByRepo.map((r) => r.repoFullName),
+  ]);
+  const mergedMap = new Map(mergedByRepo.map((r) => [r.repoFullName, r.count]));
+  const openedMap = new Map(openedByRepo.map((r) => [r.repoFullName, r.count]));
+  const prsByRepo = [...repoNames]
+    .map((repo) => ({
+      repo: repo.includes("/") ? repo.split("/")[1] : repo,
+      opened: openedMap.get(repo) ?? 0,
+      merged: mergedMap.get(repo) ?? 0,
+    }))
+    .sort((a, b) => (b.opened + b.merged) - (a.opened + a.merged));
+
+  return NextResponse.json({ prs, leaderboard, prsByRepo });
 }

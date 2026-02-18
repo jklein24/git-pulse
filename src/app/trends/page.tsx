@@ -11,6 +11,7 @@ import LinesChart from "@/components/charts/LinesChart";
 import ChurnChart from "@/components/charts/ChurnChart";
 import AvgPrSizeChart from "@/components/charts/AvgPrSizeChart";
 import ReviewIterationsChart from "@/components/charts/ReviewIterationsChart";
+import MergeTimeBySizeChart from "@/components/charts/MergeTimeBySizeChart";
 
 function InfoTooltip({ text }: { text: string }) {
   return (
@@ -28,6 +29,7 @@ export default function TrendsPage() {
   const { startDate, endDate } = useDateRange();
   const [throughput, setThroughput] = useState<Array<{ week: string; prCount: number; loc: number; prsPerContributor: number; linesPerContributor: number }>>([]);
   const [mergeTime, setMergeTime] = useState<Array<{ week: string; p50: number; p75: number; p90: number }>>([]);
+  const [mergeTimeBySize, setMergeTimeBySize] = useState<Array<{ bucket: string; p50: number; p75: number; prCount: number }>>([]);
   const [reviewVelocity, setReviewVelocity] = useState<Array<{ week: string; medianHours: number }>>([]);
   const [reviewLoad, setReviewLoad] = useState<Array<{ login: string; reviewCount: number }>>([]);
   const [lines, setLines] = useState<Array<{ login: string; additions: number; deletions: number }>>([]);
@@ -50,6 +52,7 @@ export default function TrendsPage() {
     ]).then(([tp, mt, rv, rl, ln, ch, ri]) => {
       setThroughput(tp.teamThroughput || []);
       setMergeTime(mt.mergeTimeTrend || []);
+      setMergeTimeBySize(mt.mergeTimeBySize || []);
       setReviewVelocity(rv.reviewVelocityTrend || []);
       setReviewLoad(rl.reviewLoad || []);
       setLines(ln.linesPerPerson || []);
@@ -101,6 +104,15 @@ export default function TrendsPage() {
           <span className="ml-2 text-xs font-mono text-text-muted">p50 / p75 / p90</span>
         </h2>
         <MergeTimeChart data={mergeTime} />
+      </section>
+
+      <section>
+        <h2 className="text-base font-display font-semibold mb-4 text-text-secondary">
+          Time to Merge by PR Size
+          <InfoTooltip text="Median and 75th percentile merge time grouped by total lines changed (filtered additions + deletions). Shows how PR size affects review and merge speed." />
+          <span className="ml-2 text-xs font-mono text-text-muted">p50 / p75</span>
+        </h2>
+        <MergeTimeBySizeChart data={mergeTimeBySize} />
       </section>
 
       <section>

@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { useParams } from "next/navigation";
 import Link from "next/link";
+import PrsByRepoChart from "@/components/charts/PrsByRepoChart";
 
 interface WeekPR {
   number: number;
@@ -44,6 +45,7 @@ export default function WeekDetailPage() {
   const weekStart = Number(params.weekStart);
   const [prs, setPrs] = useState<WeekPR[]>([]);
   const [leaderboard, setLeaderboard] = useState<LeaderboardEntry[]>([]);
+  const [prsByRepo, setPrsByRepo] = useState<Array<{ repo: string; opened: number; merged: number }>>([]);
   const [loading, setLoading] = useState(true);
 
   const weekLabel = new Date(weekStart * 1000).toLocaleDateString("en-US", {
@@ -58,6 +60,7 @@ export default function WeekDetailPage() {
       .then((data) => {
         setPrs(data.prs || []);
         setLeaderboard(data.leaderboard || []);
+        setPrsByRepo(data.prsByRepo || []);
         setLoading(false);
       });
   }, [weekStart]);
@@ -127,6 +130,11 @@ export default function WeekDetailPage() {
             </table>
           </div>
         )}
+      </section>
+
+      <section>
+        <h2 className="text-base font-display font-semibold mb-4 text-text-secondary">PRs by Repository</h2>
+        <PrsByRepoChart data={prsByRepo} />
       </section>
 
       <section>
