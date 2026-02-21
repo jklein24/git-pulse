@@ -91,17 +91,17 @@ export default function TrendsPage() {
     <div className="space-y-8">
       <h1 className="text-2xl font-display font-bold tracking-tight">Trends</h1>
 
+      <section>
+        <h2 className="text-base font-display font-semibold mb-4 text-text-secondary">Team Throughput</h2>
+        <ThroughputChart data={throughput} onWeekClick={handleWeekClick} />
+      </section>
+
       {aiTrend.length > 0 && (
         <section>
           <h2 className="text-base font-display font-semibold mb-4 text-text-secondary">AI Usage Trend</h2>
           <AiUsageTrendChart data={aiTrend} />
         </section>
       )}
-
-      <section>
-        <h2 className="text-base font-display font-semibold mb-4 text-text-secondary">Team Throughput</h2>
-        <ThroughputChart data={throughput} onWeekClick={handleWeekClick} />
-      </section>
 
       <section>
         <h2 className="text-base font-display font-semibold mb-4 text-text-secondary">
