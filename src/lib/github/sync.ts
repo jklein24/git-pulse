@@ -4,7 +4,7 @@ import { repos, users, pullRequests, prFiles, prReviews, syncJobs, settings } fr
 import { createGitHubClient, fetchPullRequests, fetchPRFiles, type PullRequestNode, type RateLimit } from "./client";
 import { transformPR, transformReview, isFileExcluded, computeFilteredStats, toUnix } from "./transforms";
 
-const SIX_MONTHS_SEC = 6 * 30 * 24 * 60 * 60;
+const ONE_YEAR_SEC = 365 * 24 * 60 * 60;
 
 function log(repo: string, ...args: unknown[]) {
   const ts = new Date().toISOString().slice(11, 23);
@@ -150,14 +150,15 @@ async function processPR(
   return { isNew, filesProcessed };
 }
 
-export async function syncRepo(repoId: number): Promise<void> {
+export async function syncRepo(repoId: number, opts?: { backfill?: boolean }): Promise<void> {
   const db = getDb();
   const repo = await db.select().from(repos).where(eq(repos.id, repoId)).get();
   if (!repo) throw new Error(`Repo ${repoId} not found`);
 
   const repoFullName = repo.fullName;
   const isInitialSync = !repo.lastSyncedAt;
-  const cutoffDate = new Date((Math.floor(Date.now() / 1000) - SIX_MONTHS_SEC) * 1000).toISOString().slice(0, 10);
+  const backfill = opts?.backfill ?? false;
+  const cutoffDate = new Date((Math.floor(Date.now() / 1000) - ONE_YEAR_SEC) * 1000).toISOString().slice(0, 10);
 
   log(repoFullName, `Starting sync (${isInitialSync ? `initial, cutoff=${cutoffDate}` : "incremental"})`);
 
@@ -166,7 +167,7 @@ export async function syncRepo(repoId: number): Promise<void> {
 
   const client = createGitHubClient(patRow.value);
   const excludeGlobs = await getExcludeGlobs();
-  const cutoff = Math.floor(Date.now() / 1000) - SIX_MONTHS_SEC;
+  const cutoff = Math.floor(Date.now() / 1000) - ONE_YEAR_SEC;
 
   if (excludeGlobs.length > 0) {
     log(repoFullName, `Exclude globs: ${excludeGlobs.join(", ")}`);
@@ -208,9 +209,15 @@ export async function syncRepo(repoId: number): Promise<void> {
       for (const pr of prs) {
         const updatedAt = toUnix(pr.updatedAt);
         if (updatedAt && updatedAt < cutoff) {
-          log(repoFullName, `Reached 6-month cutoff at PR #${pr.number} (updatedAt=${pr.updatedAt.slice(0, 10)}). Stopping.`);
+          log(repoFullName, `Reached cutoff at PR #${pr.number} (updatedAt=${pr.updatedAt.slice(0, 10)}). Stopping.`);
           done = true;
           break;
+        }
+
+        const createdAt = toUnix(pr.createdAt);
+        if (backfill && createdAt && createdAt < cutoff) {
+          totalSkipped++;
+          continue;
         }
 
         const existing = await db.select({ state: pullRequests.state })
@@ -220,7 +227,7 @@ export async function syncRepo(repoId: number): Promise<void> {
         if (existing?.state === "MERGED") {
           consecutiveMerged++;
           totalSkipped++;
-          if (consecutiveMerged >= 10) {
+          if (!backfill && consecutiveMerged >= 10) {
             log(repoFullName, `Hit ${consecutiveMerged} consecutive already-merged PRs. Stopping early.`);
             done = true;
             break;

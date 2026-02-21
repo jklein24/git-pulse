@@ -3,6 +3,7 @@ import { getPrsMergedPerPerson } from "@/lib/metrics/throughput";
 import { getLinesPerPerson } from "@/lib/metrics/lines";
 import { getReviewLoad } from "@/lib/metrics/review-load";
 import { getMergeTimePerPerson } from "@/lib/metrics/merge-time";
+import { getPerPersonAiStats } from "@/lib/metrics/ai-usage";
 
 export async function GET(request: NextRequest) {
   const { searchParams } = new URL(request.url);
@@ -10,11 +11,12 @@ export async function GET(request: NextRequest) {
   const startDate = Number(searchParams.get("startDate")) || now - 30 * 86400;
   const endDate = Number(searchParams.get("endDate")) || now;
 
-  const [prsMerged, lines, reviews, mergeTimes] = await Promise.all([
+  const [prsMerged, lines, reviews, mergeTimes, aiStats] = await Promise.all([
     getPrsMergedPerPerson(startDate, endDate),
     getLinesPerPerson(startDate, endDate),
     getReviewLoad(startDate, endDate),
     getMergeTimePerPerson(startDate, endDate),
+    getPerPersonAiStats(startDate, endDate).catch(() => []),
   ]);
 
   const people: Record<string, {
@@ -25,6 +27,8 @@ export async function GET(request: NextRequest) {
     linesDeleted: number;
     reviewCount: number;
     medianMergeTimeHours: number | null;
+    aiSessions: number;
+    aiPrPercent: number;
   }> = {};
 
   const ensure = (login: string, avatarUrl: string | null) => {
@@ -37,6 +41,8 @@ export async function GET(request: NextRequest) {
         linesDeleted: 0,
         reviewCount: 0,
         medianMergeTimeHours: null,
+        aiSessions: 0,
+        aiPrPercent: 0,
       };
     }
   };
@@ -62,7 +68,17 @@ export async function GET(request: NextRequest) {
     people[row.login].medianMergeTimeHours = row.medianHours;
   }
 
-  const leaderboard = Object.values(people).sort((a, b) => b.prsMerged - a.prsMerged);
+  const aiByLogin = new Map(aiStats.map((r) => [r.login, r]));
+  for (const [login, p] of Object.entries(people)) {
+    const ai = aiByLogin.get(login);
+    if (ai) {
+      p.aiSessions = ai.sessions ?? 0;
+      p.aiPrPercent = p.prsMerged > 0 ? Math.round(((ai.prs ?? 0) / p.prsMerged) * 100) : 0;
+    }
+  }
 
-  return NextResponse.json({ leaderboard });
+  const leaderboard = Object.values(people).sort((a, b) => b.prsMerged - a.prsMerged);
+  const hasAiData = aiStats.length > 0;
+
+  return NextResponse.json({ leaderboard, hasAiData });
 }

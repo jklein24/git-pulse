@@ -46,6 +46,9 @@ export default function DashboardPage() {
   const [summaryLoading, setSummaryLoading] = useState(false);
   const [summaryError, setSummaryError] = useState<string | null>(null);
   const [hasCachedSummary, setHasCachedSummary] = useState(false);
+  const [aiPrs, setAiPrs] = useState(0);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const [aiSparkline, setAiSparkline] = useState<Array<{ value: number }>>([]);
 
   const currentWeekStart = getCurrentWeekStart();
 
@@ -75,9 +78,16 @@ export default function DashboardPage() {
     Promise.all([
       fetch(`/api/metrics/throughput?startDate=${startDate}&endDate=${endDate}`).then((r) => r.json()),
       fetch(`/api/metrics/outliers?startDate=${startDate}&endDate=${endDate}`).then((r) => r.json()),
-    ]).then(([throughputData, outlierData]) => {
+      fetch(`/api/metrics/ai-usage?startDate=${startDate}&endDate=${endDate}`).then((r) => r.json()).catch(() => ({})),
+    ]).then(([throughputData, outlierData, aiData]) => {
       setThroughput(throughputData.teamThroughput || []);
       setOutliers([...(outlierData.outliers || []), ...(outlierData.trendOutliers || [])]);
+      if (aiData.summary) {
+        setAiPrs(aiData.summary.aiAssistedPrs ?? 0);
+      }
+      if (aiData.trend) {
+        setAiSparkline(aiData.trend.map((t: { prs: number }) => ({ value: t.prs ?? 0 })));
+      }
       setLoading(false);
     });
     fetchSummary(false);
@@ -135,6 +145,14 @@ export default function DashboardPage() {
           sparklineData={throughput.map((w) => ({ value: w.additions }))}
           accentColor="#34D399"
         />
+        {aiPrs > 0 && (
+          <MetricCard
+            title="AI-Assisted PRs"
+            value={aiPrs}
+            sparklineData={aiSparkline.length > 1 ? aiSparkline : undefined}
+            accentColor="#A78BFA"
+          />
+        )}
         {!hideIndividualMetrics && (
           <MetricCard
             title="Outlier Alerts"

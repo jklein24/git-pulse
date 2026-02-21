@@ -60,6 +60,15 @@ function AlertIcon({ className }: { className?: string }) {
   );
 }
 
+function AiSparkIcon({ className }: { className?: string }) {
+  return (
+    <svg className={className} viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M10 2l1.5 4.5L16 8l-4.5 1.5L10 14l-1.5-4.5L4 8l4.5-1.5L10 2z" />
+      <path d="M15 13l.75 2.25L18 16l-2.25.75L15 19l-.75-2.25L12 16l2.25-.75L15 13z" />
+    </svg>
+  );
+}
+
 function GearIcon({ className }: { className?: string }) {
   return (
     <svg className={className} viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
@@ -75,6 +84,7 @@ const NAV_ITEMS = [
   { href: "/prs", label: "Pull Requests", Icon: GitPullRequestIcon },
   { href: "/trends", label: "Trends", Icon: TrendUpIcon },
   { href: "/outliers", label: "Outliers", Icon: AlertIcon },
+  { href: "/ai-impact", label: "AI Impact", Icon: AiSparkIcon },
   { href: "/settings", label: "Settings", Icon: GearIcon },
 ];
 

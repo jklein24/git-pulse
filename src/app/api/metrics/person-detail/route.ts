@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { sql, and, gte, lte, eq, or, isNotNull, desc } from "drizzle-orm";
 import { getDb } from "@/lib/db";
-import { pullRequests, users, repos, prReviews } from "@/lib/db/schema";
+import { pullRequests, users, repos, prReviews, claudeCodeUsage } from "@/lib/db/schema";
 import { formatDate, MONDAY_OFFSET } from "@/lib/metrics/utils";
 
 export async function GET(request: NextRequest) {
@@ -96,6 +96,78 @@ export async function GET(request: NextRequest) {
       desc(pullRequests.createdAt),
     );
 
+  const userRecord = await db
+    .select({ id: users.id, email: users.email })
+    .from(users)
+    .where(eq(users.githubLogin, login))
+    .get();
+
+  let aiWeekly: Array<{ week: string; sessions: number; aiPrs: number; costCents: number }> = [];
+  let aiSummary = { sessions: 0, aiPrs: 0, aiCommits: 0, acceptRate: 0, costCents: 0 };
+
+  if (userRecord?.id) {
+    const startStr = formatDate(startDate);
+    const endStr = formatDate(endDate);
+
+    const weekExpr = sql<number>`((cast(strftime('%s', ${claudeCodeUsage.date}) as integer) + ${MONDAY_OFFSET}) - ((cast(strftime('%s', ${claudeCodeUsage.date}) as integer) + ${MONDAY_OFFSET}) % 604800)) - ${MONDAY_OFFSET}`;
+
+    const aiWeeklyRows = await db
+      .select({
+        week: weekExpr.as("week"),
+        sessions: sql<number>`sum(${claudeCodeUsage.numSessions})`.as("sessions"),
+        aiPrs: sql<number>`sum(${claudeCodeUsage.prsByClaudeCode})`.as("ai_prs"),
+        costCents: sql<number>`sum(${claudeCodeUsage.estimatedCostCents})`.as("cost_cents"),
+      })
+      .from(claudeCodeUsage)
+      .where(
+        and(
+          eq(claudeCodeUsage.userId, userRecord.id),
+          gte(claudeCodeUsage.date, startStr),
+          lte(claudeCodeUsage.date, endStr),
+        ),
+      )
+      .groupBy(sql`week`)
+      .orderBy(sql`week`);
+
+    aiWeekly = aiWeeklyRows.map((r) => ({
+      week: formatDate(r.week),
+      sessions: r.sessions ?? 0,
+      aiPrs: r.aiPrs ?? 0,
+      costCents: r.costCents ?? 0,
+    }));
+
+    const aiTotal = await db
+      .select({
+        sessions: sql<number>`sum(${claudeCodeUsage.numSessions})`.as("sessions"),
+        aiPrs: sql<number>`sum(${claudeCodeUsage.prsByClaudeCode})`.as("ai_prs"),
+        aiCommits: sql<number>`sum(${claudeCodeUsage.commitsByClaudeCode})`.as("ai_commits"),
+        accepted: sql<number>`sum(${claudeCodeUsage.editToolAccepted} + ${claudeCodeUsage.writeToolAccepted} + ${claudeCodeUsage.multiEditToolAccepted})`.as("accepted"),
+        rejected: sql<number>`sum(${claudeCodeUsage.editToolRejected} + ${claudeCodeUsage.writeToolRejected} + ${claudeCodeUsage.multiEditToolRejected})`.as("rejected"),
+        costCents: sql<number>`sum(${claudeCodeUsage.estimatedCostCents})`.as("cost_cents"),
+      })
+      .from(claudeCodeUsage)
+      .where(
+        and(
+          eq(claudeCodeUsage.userId, userRecord.id),
+          gte(claudeCodeUsage.date, startStr),
+          lte(claudeCodeUsage.date, endStr),
+        ),
+      )
+      .get();
+
+    if (aiTotal) {
+      const accepted = aiTotal.accepted ?? 0;
+      const rejected = aiTotal.rejected ?? 0;
+      aiSummary = {
+        sessions: aiTotal.sessions ?? 0,
+        aiPrs: aiTotal.aiPrs ?? 0,
+        aiCommits: aiTotal.aiCommits ?? 0,
+        acceptRate: accepted + rejected > 0 ? Math.round((accepted / (accepted + rejected)) * 100) : 0,
+        costCents: aiTotal.costCents ?? 0,
+      };
+    }
+  }
+
   return NextResponse.json({
     user,
     weeklyPrs: weeklyPrs.map((r) => ({
@@ -105,5 +177,7 @@ export async function GET(request: NextRequest) {
     })),
     weeklyReviews: weeklyReviews.map((r) => ({ week: formatDate(r.week), count: r.count })),
     recentPrs,
+    aiWeekly,
+    aiSummary,
   });
 }

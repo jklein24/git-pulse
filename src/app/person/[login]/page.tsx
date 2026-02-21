@@ -62,11 +62,28 @@ interface RecentPr {
   repoFullName: string;
 }
 
+interface AiWeekly {
+  week: string;
+  sessions: number;
+  aiPrs: number;
+  costCents: number;
+}
+
+interface AiSummary {
+  sessions: number;
+  aiPrs: number;
+  aiCommits: number;
+  acceptRate: number;
+  costCents: number;
+}
+
 interface PersonData {
   user: { login: string; avatarUrl: string | null };
   weeklyPrs: WeeklyPrCount[];
   weeklyReviews: WeeklyCount[];
   recentPrs: RecentPr[];
+  aiWeekly?: AiWeekly[];
+  aiSummary?: AiSummary;
 }
 
 function mergeWeeklyData(prs: WeeklyPrCount[], reviews: WeeklyCount[]): WeeklyActivity[] {
@@ -187,6 +204,41 @@ export default function PersonDetailPage() {
           )}
         </div>
       </div>
+
+      {data.aiSummary && data.aiSummary.sessions > 0 && (
+        <div className="space-y-3">
+          <h2 className="text-sm font-display font-semibold text-text-muted uppercase tracking-widest">AI Usage</h2>
+          <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
+            {[
+              { label: "Sessions", value: data.aiSummary.sessions },
+              { label: "AI PRs", value: data.aiSummary.aiPrs },
+              { label: "AI Commits", value: data.aiSummary.aiCommits },
+              { label: "Accept %", value: `${data.aiSummary.acceptRate}%` },
+              { label: "Cost", value: `$${(data.aiSummary.costCents / 100).toFixed(2)}` },
+            ].map((stat) => (
+              <div key={stat.label} className="bg-bg-secondary rounded-lg border border-border p-3 text-center">
+                <div className="text-[10px] font-display font-semibold text-text-muted uppercase tracking-widest">{stat.label}</div>
+                <div className="text-lg font-display font-bold text-text-primary mt-1">{stat.value}</div>
+              </div>
+            ))}
+          </div>
+          {data.aiWeekly && data.aiWeekly.length > 0 && (
+            <div className="rounded-xl border border-border bg-bg-secondary p-5">
+              <ResponsiveContainer width="100%" height={200}>
+                <ComposedChart data={data.aiWeekly}>
+                  <CartesianGrid stroke={CHART_COLORS.grid} strokeDasharray="3 3" vertical={false} />
+                  <XAxis dataKey="week" tick={{ fontSize: 11, fill: CHART_COLORS.axis, fontFamily: "var(--font-dm-mono)" }} axisLine={{ stroke: CHART_COLORS.grid }} tickLine={false} />
+                  <YAxis tick={{ fontSize: 11, fill: CHART_COLORS.axis, fontFamily: "var(--font-dm-mono)" }} axisLine={false} tickLine={false} />
+                  <Tooltip contentStyle={{ background: CHART_COLORS.tooltipBg, border: `1px solid ${CHART_COLORS.tooltipBorder}`, borderRadius: 8, fontSize: 12, fontFamily: "var(--font-dm-mono)", color: "#E8EDF5" }} itemStyle={{ color: "#E8EDF5" }} />
+                  <Legend wrapperStyle={{ fontSize: 11, fontFamily: "var(--font-dm-mono)", color: CHART_COLORS.axis }} />
+                  <Bar dataKey="sessions" name="Sessions" fill="#A78BFA" radius={[4, 4, 0, 0]} fillOpacity={0.85} />
+                  <Line type="monotone" dataKey="aiPrs" name="AI PRs" stroke="#22D3EE" strokeWidth={2} dot={{ r: 3, fill: "#22D3EE" }} />
+                </ComposedChart>
+              </ResponsiveContainer>
+            </div>
+          )}
+        </div>
+      )}
 
       <div className="space-y-2">
         <h2 className="text-sm font-display font-semibold text-text-muted uppercase tracking-widest">Pull Requests</h2>

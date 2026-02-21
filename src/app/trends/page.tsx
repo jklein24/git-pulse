@@ -12,6 +12,7 @@ import ChurnChart from "@/components/charts/ChurnChart";
 import AvgPrSizeChart from "@/components/charts/AvgPrSizeChart";
 import ReviewIterationsChart from "@/components/charts/ReviewIterationsChart";
 import MergeTimeBySizeChart from "@/components/charts/MergeTimeBySizeChart";
+import AiUsageTrendChart from "@/components/charts/AiUsageTrendChart";
 
 function InfoTooltip({ text }: { text: string }) {
   return (
@@ -35,6 +36,7 @@ export default function TrendsPage() {
   const [lines, setLines] = useState<Array<{ login: string; additions: number; deletions: number }>>([]);
   const [churn, setChurn] = useState<Array<{ week: string; rate: number }>>([]);
   const [reviewIterations, setReviewIterations] = useState<Array<{ week: string; medianIterations: number; avgIterations: number; prCount: number }>>([]);
+  const [aiTrend, setAiTrend] = useState<Array<{ week: string; sessions: number; linesAdded: number; activeUsers: number }>>([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -49,7 +51,8 @@ export default function TrendsPage() {
       fetch(`/api/metrics/lines?${qs}`).then((r) => r.json()),
       fetch(`/api/metrics/churn?${qs}`).then((r) => r.json()),
       fetch(`/api/metrics/review-iterations?${qs}`).then((r) => r.json()),
-    ]).then(([tp, mt, rv, rl, ln, ch, ri]) => {
+      fetch(`/api/metrics/ai-usage?${qs}`).then((r) => r.json()).catch(() => ({})),
+    ]).then(([tp, mt, rv, rl, ln, ch, ri, ai]) => {
       setThroughput(tp.teamThroughput || []);
       setMergeTime(mt.mergeTimeTrend || []);
       setMergeTimeBySize(mt.mergeTimeBySize || []);
@@ -58,6 +61,14 @@ export default function TrendsPage() {
       setLines(ln.linesPerPerson || []);
       setChurn(ch.churnRate || []);
       setReviewIterations(ri.reviewIterationsTrend || []);
+      if (ai.trend) {
+        setAiTrend(ai.trend.map((t: { week: number; sessions: number; linesAdded: number; activeUsers: number }) => ({
+          week: new Date(t.week * 1000).toISOString().split("T")[0],
+          sessions: t.sessions ?? 0,
+          linesAdded: t.linesAdded ?? 0,
+          activeUsers: t.activeUsers ?? 0,
+        })));
+      }
       setLoading(false);
     });
   }, [startDate, endDate]);
@@ -79,6 +90,13 @@ export default function TrendsPage() {
   return (
     <div className="space-y-8">
       <h1 className="text-2xl font-display font-bold tracking-tight">Trends</h1>
+
+      {aiTrend.length > 0 && (
+        <section>
+          <h2 className="text-base font-display font-semibold mb-4 text-text-secondary">AI Usage Trend</h2>
+          <AiUsageTrendChart data={aiTrend} />
+        </section>
+      )}
 
       <section>
         <h2 className="text-base font-display font-semibold mb-4 text-text-secondary">Team Throughput</h2>

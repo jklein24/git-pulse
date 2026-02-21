@@ -1,6 +1,6 @@
 import { sql, and, gte, lte, eq, isNotNull } from "drizzle-orm";
 import { getDb } from "../db";
-import { pullRequests, prReviews, users } from "../db/schema";
+import { pullRequests, prReviews, users, claudeCodeUsage } from "../db/schema";
 import { stddev, mean, rollingAverage, formatDate, MONDAY_OFFSET } from "./utils";
 
 const EXCLUDED_LOGINS = new Set([
@@ -172,6 +172,79 @@ export async function getOutliers(startDate: number, endDate: number): Promise<O
 
   outliers.push(...detectTopBottom(locMetrics, "Lines Written"));
   outliers.push(...detectStatisticalOutliers(locMetrics, "Lines Written"));
+
+  const startStr = formatDate(startDate);
+  const endStr = formatDate(endDate);
+
+  try {
+    const aiSessionsData = await db
+      .select({
+        login: users.githubLogin,
+        avatarUrl: users.avatarUrl,
+        sessions: sql<number>`sum(${claudeCodeUsage.numSessions})`.as("sessions"),
+        accepted: sql<number>`sum(${claudeCodeUsage.editToolAccepted} + ${claudeCodeUsage.writeToolAccepted} + ${claudeCodeUsage.multiEditToolAccepted})`.as("accepted"),
+        rejected: sql<number>`sum(${claudeCodeUsage.editToolRejected} + ${claudeCodeUsage.writeToolRejected} + ${claudeCodeUsage.multiEditToolRejected})`.as("rejected"),
+      })
+      .from(claudeCodeUsage)
+      .innerJoin(users, eq(claudeCodeUsage.userId, users.id))
+      .where(and(gte(claudeCodeUsage.date, startStr), lte(claudeCodeUsage.date, endStr)))
+      .groupBy(users.githubLogin);
+
+    if (aiSessionsData.length >= 3) {
+      const sessionMetrics: PersonMetric[] = aiSessionsData
+        .filter((r) => !EXCLUDED_LOGINS.has(r.login))
+        .map((r) => ({
+          login: r.login,
+          avatarUrl: r.avatarUrl,
+          value: r.sessions ?? 0,
+        }));
+
+      const teamMeanSessions = mean(sessionMetrics.map((d) => d.value));
+
+      const allContributors = prsMerged
+        .filter((r) => !EXCLUDED_LOGINS.has(r.login))
+        .map((r) => r.login);
+
+      const aiLogins = new Set(aiSessionsData.map((r) => r.login));
+      for (const login of allContributors) {
+        if (!aiLogins.has(login)) {
+          const user = prsMerged.find((r) => r.login === login);
+          outliers.push({
+            login,
+            avatarUrl: user?.avatarUrl ?? null,
+            metric: "AI Sessions (low adoption)",
+            value: 0,
+            teamMean: Math.round(teamMeanSessions * 10) / 10,
+            type: "bottom",
+            severity: "warning",
+          });
+        }
+      }
+
+      for (const r of aiSessionsData) {
+        if (EXCLUDED_LOGINS.has(r.login)) continue;
+        const accepted = r.accepted ?? 0;
+        const rejected = r.rejected ?? 0;
+        const total = accepted + rejected;
+        if (total >= 10) {
+          const rate = Math.round((accepted / total) * 100);
+          if (rate < 50) {
+            outliers.push({
+              login: r.login,
+              avatarUrl: r.avatarUrl,
+              metric: "AI Accept Rate (low)",
+              value: rate,
+              teamMean: 50,
+              type: "bottom",
+              severity: "warning",
+            });
+          }
+        }
+      }
+    }
+  } catch {
+    // AI data may not exist yet
+  }
 
   const seen = new Set<string>();
   return outliers.filter((o) => {

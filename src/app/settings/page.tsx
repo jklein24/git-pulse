@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, Suspense } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
 import { useSettings } from "@/components/layout/SettingsContext";
 
@@ -28,7 +28,15 @@ const STATUS_STYLES: Record<string, string> = {
   FAILED: "bg-danger/10 text-danger border border-danger/20",
 };
 
-export default function SettingsPage() {
+export default function SettingsPageWrapper() {
+  return (
+    <Suspense fallback={<div className="flex items-center gap-3 text-text-muted text-sm"><span className="w-4 h-4 border-2 border-text-muted border-t-accent rounded-full animate-spin" />Loading settings...</div>}>
+      <SettingsPage />
+    </Suspense>
+  );
+}
+
+function SettingsPage() {
   const searchParams = useSearchParams();
   const router = useRouter();
 
@@ -50,6 +58,16 @@ export default function SettingsPage() {
   const [syncJobs, setSyncJobs] = useState<SyncJob[]>([]);
   const [syncingRepos, setSyncingRepos] = useState<Set<number>>(new Set());
   const [removingRepos, setRemovingRepos] = useState<Set<number>>(new Set());
+
+  const [claudeApiKey, setClaudeApiKey] = useState("");
+  const [claudeApiKeySaving, setClaudeApiKeySaving] = useState(false);
+  const [claudeApiKeyStatus, setClaudeApiKeyStatus] = useState<{ ok?: boolean; error?: string } | null>(null);
+  const [claudeLastSynced, setClaudeLastSynced] = useState<string | null>(null);
+  const [claudeSyncing, setClaudeSyncing] = useState(false);
+  const [claudeSyncResult, setClaudeSyncResult] = useState<{ recordsProcessed?: number; unmappedEmails?: string[]; error?: string } | null>(null);
+  const [usersList, setUsersList] = useState<Array<{ id: number; githubLogin: string; email: string | null }>>([]);
+  const [unmappedEmails, setUnmappedEmails] = useState<string[]>([]);
+  const [autoDetecting, setAutoDetecting] = useState(false);
 
   const { hideIndividualMetrics, setHideIndividualMetrics } = useSettings();
 
@@ -78,10 +96,16 @@ export default function SettingsPage() {
           try { setGlobs(JSON.parse(data.exclude_globs)); } catch {}
         }
         if (data.churn_window_days) setChurnDays(data.churn_window_days);
+        if (data.claude_admin_api_key) setClaudeApiKey(data.claude_admin_api_key);
       });
 
     fetch("/api/repos").then((r) => r.json()).then(setRepos);
     fetch("/api/sync").then((r) => r.json()).then((d) => setSyncJobs(d.jobs || []));
+    fetch("/api/sync/claude").then((r) => r.json()).then((d) => setClaudeLastSynced(d.lastSynced));
+    fetch("/api/users").then((r) => r.json()).then((d) => {
+      setUsersList(d.users || []);
+      setUnmappedEmails(d.unmappedEmails || []);
+    });
   }, []);
 
   const disconnect = useCallback(async () => {
@@ -157,6 +181,77 @@ export default function SettingsPage() {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ key: "churn_window_days", value: churnDays }),
     });
+  };
+
+  const saveClaudeApiKey = async () => {
+    setClaudeApiKeySaving(true);
+    setClaudeApiKeyStatus(null);
+    try {
+      await fetch("/api/settings", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ key: "claude_admin_api_key", value: claudeApiKey }),
+      });
+      setClaudeApiKeyStatus({ ok: true });
+    } catch {
+      setClaudeApiKeyStatus({ ok: false, error: "Failed to save" });
+    } finally {
+      setClaudeApiKeySaving(false);
+    }
+  };
+
+  const syncClaudeData = async () => {
+    setClaudeSyncing(true);
+    setClaudeSyncResult(null);
+    try {
+      const res = await fetch("/api/sync/claude", { method: "POST" });
+      const data = await res.json();
+      if (res.ok) {
+        setClaudeSyncResult(data);
+        const syncStatus = await fetch("/api/sync/claude").then((r) => r.json());
+        setClaudeLastSynced(syncStatus.lastSynced);
+        const usersData = await fetch("/api/users").then((r) => r.json());
+        setUsersList(usersData.users || []);
+        setUnmappedEmails(usersData.unmappedEmails || []);
+      } else {
+        setClaudeSyncResult({ error: data.error });
+      }
+    } catch {
+      setClaudeSyncResult({ error: "Sync failed" });
+    } finally {
+      setClaudeSyncing(false);
+    }
+  };
+
+  const updateUserEmail = async (userId: number, email: string) => {
+    await fetch("/api/users", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ userId, email }),
+    });
+    setUsersList((prev) =>
+      prev.map((u) => (u.id === userId ? { ...u, email: email || null } : u)),
+    );
+    const usersData = await fetch("/api/users").then((r) => r.json());
+    setUnmappedEmails(usersData.unmappedEmails || []);
+  };
+
+  const autoDetectEmails = async () => {
+    setAutoDetecting(true);
+    try {
+      const res = await fetch("/api/users", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "auto-detect" }),
+      });
+      if (res.ok) {
+        const usersData = await fetch("/api/users").then((r) => r.json());
+        setUsersList(usersData.users || []);
+        setUnmappedEmails(usersData.unmappedEmails || []);
+      }
+    } finally {
+      setAutoDetecting(false);
+    }
   };
 
   const syncRepo = async (repoId: number) => {
@@ -395,6 +490,125 @@ export default function SettingsPage() {
             className="w-20 px-3 py-2 text-sm font-mono bg-bg-tertiary border border-border rounded-lg text-text-primary focus:outline-none focus:border-accent/40 focus:shadow-[0_0_0_2px_rgba(34,211,238,0.08)] transition-all"
           />
         </div>
+      </section>
+
+      <section className="bg-bg-secondary rounded-xl border border-border p-6 space-y-4">
+        <h2 className="text-[11px] font-display font-semibold uppercase tracking-widest text-text-muted">
+          Claude Code Analytics
+        </h2>
+        <p className="text-xs text-text-muted">
+          Enter your Anthropic Admin API key to sync Claude Code usage data.
+        </p>
+        <div className="flex gap-2">
+          <input
+            type="password"
+            value={claudeApiKey}
+            onChange={(e) => setClaudeApiKey(e.target.value)}
+            placeholder="sk-ant-admin..."
+            className="flex-1 px-3 py-2 text-sm font-mono bg-bg-tertiary border border-border rounded-lg text-text-primary placeholder:text-text-muted focus:outline-none focus:border-accent/40 focus:shadow-[0_0_0_2px_rgba(34,211,238,0.08)] transition-all"
+          />
+          <button
+            onClick={saveClaudeApiKey}
+            disabled={claudeApiKeySaving}
+            className="px-4 py-2 text-sm font-display font-semibold rounded-lg bg-accent/10 text-accent border border-accent/20 hover:bg-accent/15 hover:border-accent/40 disabled:opacity-50 transition-all"
+          >
+            {claudeApiKeySaving ? "Saving..." : "Save"}
+          </button>
+        </div>
+        {claudeApiKeyStatus && (
+          <div className={`flex items-center gap-2 text-sm ${claudeApiKeyStatus.ok ? "text-success" : "text-danger"}`}>
+            <div className={`w-1.5 h-1.5 rounded-full ${claudeApiKeyStatus.ok ? "bg-success" : "bg-danger"}`} />
+            {claudeApiKeyStatus.ok ? "API key saved" : `Error: ${claudeApiKeyStatus.error}`}
+          </div>
+        )}
+        <div className="flex items-center gap-4 pt-2">
+          <button
+            onClick={syncClaudeData}
+            disabled={claudeSyncing || !claudeApiKey}
+            className="px-4 py-2 text-sm font-display font-semibold rounded-lg bg-violet-500/10 text-violet-400 border border-violet-500/20 hover:bg-violet-500/15 hover:border-violet-500/40 disabled:opacity-50 transition-all"
+          >
+            {claudeSyncing ? (
+              <span className="inline-flex items-center gap-1.5">
+                <span className="inline-block w-3 h-3 border-2 border-violet-400/30 border-t-violet-400 rounded-full animate-spin" />
+                Syncing…
+              </span>
+            ) : "Sync Claude Data"}
+          </button>
+          {claudeLastSynced && (
+            <span className="text-xs text-text-muted font-mono">
+              Last synced: {claudeLastSynced}
+            </span>
+          )}
+        </div>
+        {claudeSyncResult && (
+          <div className={`flex items-center gap-2 text-sm ${claudeSyncResult.error ? "text-danger" : "text-success"}`}>
+            <div className={`w-1.5 h-1.5 rounded-full ${claudeSyncResult.error ? "bg-danger" : "bg-success"}`} />
+            {claudeSyncResult.error
+              ? `Error: ${claudeSyncResult.error}`
+              : `Synced ${claudeSyncResult.recordsProcessed} records${claudeSyncResult.unmappedEmails && claudeSyncResult.unmappedEmails.length > 0 ? ` (${claudeSyncResult.unmappedEmails.length} unmapped emails)` : ""}`}
+          </div>
+        )}
+      </section>
+
+      <section className="bg-bg-secondary rounded-xl border border-border p-6 space-y-4">
+        <div className="flex items-center justify-between">
+          <h2 className="text-[11px] font-display font-semibold uppercase tracking-widest text-text-muted">
+            Identity Mapping
+          </h2>
+          <button
+            onClick={autoDetectEmails}
+            disabled={autoDetecting}
+            className="px-3 py-1.5 text-xs font-display font-semibold rounded-lg bg-accent/10 text-accent border border-accent/20 hover:bg-accent/15 hover:border-accent/40 disabled:opacity-50 transition-all"
+          >
+            {autoDetecting ? "Detecting..." : "Auto-detect from GitHub"}
+          </button>
+        </div>
+        <p className="text-xs text-text-muted">
+          Map GitHub users to their email addresses used in Claude Code. This enables correlating Claude Code usage with GitHub activity.
+        </p>
+        {unmappedEmails.length > 0 && (
+          <div className="bg-warning/5 border border-warning/20 rounded-lg px-4 py-3">
+            <p className="text-xs text-warning font-medium mb-1">Unmapped Claude Code emails:</p>
+            <div className="flex flex-wrap gap-2">
+              {unmappedEmails.map((email) => (
+                <span key={email} className="px-2 py-0.5 bg-bg-tertiary border border-border rounded text-xs font-mono text-text-secondary">
+                  {email}
+                </span>
+              ))}
+            </div>
+          </div>
+        )}
+        {usersList.length > 0 && (
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="text-left text-[11px] font-display font-semibold text-text-muted uppercase tracking-widest border-b border-border">
+                <th className="pb-3">GitHub Login</th>
+                <th className="pb-3">Email</th>
+              </tr>
+            </thead>
+            <tbody>
+              {usersList.map((user) => (
+                <tr key={user.id} className="border-b border-border/40">
+                  <td className="py-3 font-mono font-medium text-text-primary">{user.githubLogin}</td>
+                  <td className="py-3">
+                    <input
+                      type="email"
+                      defaultValue={user.email || ""}
+                      placeholder="user@example.com"
+                      onBlur={(e) => {
+                        const newEmail = e.target.value.trim();
+                        if (newEmail !== (user.email || "")) {
+                          updateUserEmail(user.id, newEmail);
+                        }
+                      }}
+                      className="w-full px-2 py-1 text-sm font-mono bg-bg-tertiary border border-border rounded text-text-primary placeholder:text-text-muted focus:outline-none focus:border-accent/40 transition-all"
+                    />
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
       </section>
 
       <section className="bg-bg-secondary rounded-xl border border-border p-6 space-y-4">

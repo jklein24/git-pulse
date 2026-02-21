@@ -6,6 +6,7 @@ const PRESETS = [
   { label: "30d", days: 30 },
   { label: "90d", days: 90 },
   { label: "6mo", days: 180 },
+  { label: "1y", days: 365 },
 ];
 
 function unixToDateInput(unix: number): string {

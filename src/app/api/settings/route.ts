@@ -8,10 +8,11 @@ import { recomputeFilteredStats } from "@/lib/github/sync";
 export async function GET() {
   const db = getDb();
   const rows = await db.select().from(settings);
+  const MASKED_KEYS = new Set(["github_pat", "claude_admin_api_key"]);
   const result: Record<string, string | boolean | null> = {};
   for (const row of rows) {
     if (row.key === "oauth_state") continue;
-    result[row.key] = row.key === "github_pat" && row.value
+    result[row.key] = MASKED_KEYS.has(row.key) && row.value
       ? `${"*".repeat(Math.max(0, row.value.length - 4))}${row.value.slice(-4)}`
       : row.value;
   }

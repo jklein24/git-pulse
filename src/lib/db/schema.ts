@@ -17,6 +17,7 @@ export const users = sqliteTable("users", {
   githubLogin: text("github_login").notNull(),
   githubId: integer("github_id"),
   avatarUrl: text("avatar_url"),
+  email: text("email"),
   firstSeenAt: integer("first_seen_at").notNull(),
 }, (table) => [
   uniqueIndex("users_github_login_idx").on(table.githubLogin),
@@ -91,3 +92,45 @@ export const settings = sqliteTable("settings", {
   key: text("key").primaryKey(),
   value: text("value"),
 });
+
+export const claudeCodeUsage = sqliteTable("claude_code_usage", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  userId: integer("user_id").references(() => users.id),
+  email: text("email").notNull(),
+  date: text("date").notNull(), // YYYY-MM-DD
+  numSessions: integer("num_sessions").default(0),
+  linesAdded: integer("lines_added").default(0),
+  linesRemoved: integer("lines_removed").default(0),
+  commitsByClaudeCode: integer("commits_by_claude_code").default(0),
+  prsByClaudeCode: integer("prs_by_claude_code").default(0),
+  editToolAccepted: integer("edit_tool_accepted").default(0),
+  editToolRejected: integer("edit_tool_rejected").default(0),
+  writeToolAccepted: integer("write_tool_accepted").default(0),
+  writeToolRejected: integer("write_tool_rejected").default(0),
+  multiEditToolAccepted: integer("multi_edit_tool_accepted").default(0),
+  multiEditToolRejected: integer("multi_edit_tool_rejected").default(0),
+  notebookEditToolAccepted: integer("notebook_edit_tool_accepted").default(0),
+  notebookEditToolRejected: integer("notebook_edit_tool_rejected").default(0),
+  totalInputTokens: integer("total_input_tokens").default(0),
+  totalOutputTokens: integer("total_output_tokens").default(0),
+  estimatedCostCents: integer("estimated_cost_cents").default(0),
+  terminalType: text("terminal_type"),
+}, (table) => [
+  uniqueIndex("claude_usage_email_date_idx").on(table.email, table.date),
+  index("claude_usage_user_id_idx").on(table.userId),
+  index("claude_usage_date_idx").on(table.date),
+]);
+
+export const claudeCodeModelUsage = sqliteTable("claude_code_model_usage", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  usageId: integer("usage_id").notNull().references(() => claudeCodeUsage.id),
+  model: text("model").notNull(),
+  inputTokens: integer("input_tokens").default(0),
+  outputTokens: integer("output_tokens").default(0),
+  cacheReadTokens: integer("cache_read_tokens").default(0),
+  cacheCreationTokens: integer("cache_creation_tokens").default(0),
+  estimatedCostCents: integer("estimated_cost_cents").default(0),
+}, (table) => [
+  index("claude_model_usage_id_idx").on(table.usageId),
+  index("claude_model_model_idx").on(table.model),
+]);

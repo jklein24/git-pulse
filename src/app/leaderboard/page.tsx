@@ -12,6 +12,8 @@ interface LeaderboardEntry {
   linesDeleted: number;
   reviewCount: number;
   medianMergeTimeHours: number;
+  aiSessions?: number;
+  aiPrPercent?: number;
 }
 
 function rankIndicator(index: number, total: number): string {
@@ -31,6 +33,7 @@ export default function LeaderboardPage() {
   const router = useRouter();
   const { startDate, endDate } = useDateRange();
   const [data, setData] = useState<LeaderboardEntry[]>([]);
+  const [hasAiData, setHasAiData] = useState(false);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -39,6 +42,7 @@ export default function LeaderboardPage() {
       .then((r) => r.json())
       .then((d) => {
         setData(d.leaderboard || d);
+        setHasAiData(d.hasAiData || false);
         setLoading(false);
       });
   }, [startDate, endDate]);
@@ -67,6 +71,8 @@ export default function LeaderboardPage() {
                 <th className="px-4 py-3 text-right">Lines +/&minus;</th>
                 <th className="px-4 py-3 text-right">Reviews</th>
                 <th className="px-4 py-3 text-right">Merge (h)</th>
+                {hasAiData && <th className="px-4 py-3 text-right">AI Sessions</th>}
+                {hasAiData && <th className="px-4 py-3 text-right">AI %</th>}
               </tr>
             </thead>
             <tbody>
@@ -93,6 +99,8 @@ export default function LeaderboardPage() {
                   </td>
                   <td className="px-4 py-3 text-right font-mono text-text-primary">{entry.reviewCount}</td>
                   <td className="px-4 py-3 text-right font-mono text-text-secondary">{entry.medianMergeTimeHours}</td>
+                  {hasAiData && <td className="px-4 py-3 text-right font-mono text-violet-400">{entry.aiSessions ?? 0}</td>}
+                  {hasAiData && <td className="px-4 py-3 text-right font-mono text-text-secondary">{entry.aiPrPercent ?? 0}%</td>}
                 </tr>
               ))}
             </tbody>
