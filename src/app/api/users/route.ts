@@ -46,9 +46,9 @@ export async function POST(request: NextRequest) {
   const body = await request.json();
 
   if (body.action === "auto-detect") {
-    const patRow = await db.select().from(settings).where(eq(settings.key, "github_pat")).get();
-    if (!patRow?.value) {
-      return NextResponse.json({ error: "GitHub PAT not configured" }, { status: 400 });
+    const tokenRow = await db.select().from(settings).where(eq(settings.key, "github_pat")).get();
+    if (!tokenRow?.value) {
+      return NextResponse.json({ error: "GitHub not connected — sign in via Settings" }, { status: 400 });
     }
 
     const allUsers = await db.select().from(users);
@@ -58,7 +58,7 @@ export async function POST(request: NextRequest) {
       if (user.email) continue;
       try {
         const res = await fetch(`https://api.github.com/users/${user.githubLogin}`, {
-          headers: { Authorization: `token ${patRow.value}` },
+          headers: { Authorization: `token ${tokenRow.value}` },
         });
         if (res.ok) {
           const data = await res.json();

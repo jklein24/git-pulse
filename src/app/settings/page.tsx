@@ -40,10 +40,7 @@ function SettingsPage() {
   const searchParams = useSearchParams();
   const router = useRouter();
 
-  const [pat, setPat] = useState("");
-  const [patStatus, setPatStatus] = useState<{ ok?: boolean; login?: string; error?: string } | null>(null);
-  const [patSaving, setPatSaving] = useState(false);
-  const [oauthConfigured, setOauthConfigured] = useState(false);
+  const [hasToken, setHasToken] = useState(false);
   const [githubLogin, setGithubLogin] = useState<string | null>(null);
   const [disconnecting, setDisconnecting] = useState(false);
   const [oauthBanner, setOauthBanner] = useState<{ type: "success" | "error"; message: string } | null>(null);
@@ -71,7 +68,6 @@ function SettingsPage() {
 
   const { hideIndividualMetrics, setHideIndividualMetrics } = useSettings();
 
-  const hasToken = pat.length > 0;
 
   useEffect(() => {
     const connected = searchParams.get("connected");
@@ -89,8 +85,7 @@ function SettingsPage() {
     fetch("/api/settings")
       .then((r) => r.json())
       .then((data) => {
-        if (data.github_pat) setPat(data.github_pat);
-        if (data._oauthConfigured) setOauthConfigured(true);
+        if (data.github_pat) setHasToken(true);
         if (data.github_login) setGithubLogin(data.github_login);
         if (data.exclude_globs) {
           try { setGlobs(JSON.parse(data.exclude_globs)); } catch {}
@@ -112,26 +107,13 @@ function SettingsPage() {
     setDisconnecting(true);
     try {
       await fetch("/api/auth/disconnect", { method: "POST" });
-      setPat("");
+      setHasToken(false);
       setGithubLogin(null);
-      setPatStatus(null);
       setOauthBanner(null);
     } finally {
       setDisconnecting(false);
     }
   }, []);
-
-  const savePat = async () => {
-    setPatSaving(true);
-    const res = await fetch("/api/settings", {
-      method: "PUT",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ key: "github_pat", value: pat }),
-    });
-    const data = await res.json();
-    setPatStatus(data.connection);
-    setPatSaving(false);
-  };
 
   const addRepo = async () => {
     const parts = newRepoInput.trim().split("/");
@@ -287,58 +269,28 @@ function SettingsPage() {
         <h2 className="text-[11px] font-display font-semibold uppercase tracking-widest text-text-muted">
           GitHub Connection
         </h2>
-        {oauthConfigured ? (
-          hasToken ? (
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-2 text-sm text-success">
-                <div className="w-2 h-2 rounded-full bg-success shadow-[0_0_6px_rgba(52,211,153,0.5)]" />
-                Connected as <span className="font-mono font-medium">@{githubLogin || "unknown"}</span>
-              </div>
-              <button
-                onClick={disconnect}
-                disabled={disconnecting}
-                className="px-4 py-2 text-sm font-display font-semibold rounded-lg bg-danger/10 text-danger border border-danger/20 hover:bg-danger/15 hover:border-danger/40 disabled:opacity-50 transition-all"
-              >
-                {disconnecting ? "Disconnecting..." : "Disconnect"}
-              </button>
+        {hasToken ? (
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2 text-sm text-success">
+              <div className="w-2 h-2 rounded-full bg-success shadow-[0_0_6px_rgba(52,211,153,0.5)]" />
+              Connected as <span className="font-mono font-medium">@{githubLogin || "unknown"}</span>
             </div>
-          ) : (
-            <a
-              href="/api/auth/github"
-              className="inline-flex items-center gap-2 px-4 py-2 text-sm font-display font-semibold rounded-lg bg-accent/10 text-accent border border-accent/20 hover:bg-accent/15 hover:border-accent/40 transition-all"
+            <button
+              onClick={disconnect}
+              disabled={disconnecting}
+              className="px-4 py-2 text-sm font-display font-semibold rounded-lg bg-danger/10 text-danger border border-danger/20 hover:bg-danger/15 hover:border-danger/40 disabled:opacity-50 transition-all"
             >
-              <svg className="w-4 h-4" viewBox="0 0 16 16" fill="currentColor"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z" /></svg>
-              Sign in with GitHub
-            </a>
-          )
+              {disconnecting ? "Disconnecting..." : "Disconnect"}
+            </button>
+          </div>
         ) : (
-          <>
-            <p className="text-xs text-text-muted">
-              Enter a <a href="https://github.com/settings/tokens" target="_blank" rel="noopener noreferrer" className="text-accent hover:underline">Personal Access Token</a> with <code className="text-xs font-mono bg-bg-tertiary px-1 py-0.5 rounded">repo</code> scope.
-            </p>
-            <div className="flex gap-2">
-              <input
-                type="password"
-                value={pat}
-                onChange={(e) => setPat(e.target.value)}
-                placeholder="ghp_..."
-                className="flex-1 px-3 py-2 text-sm font-mono bg-bg-tertiary border border-border rounded-lg text-text-primary placeholder:text-text-muted focus:outline-none focus:border-accent/40 focus:shadow-[0_0_0_2px_rgba(34,211,238,0.08)] transition-all"
-              />
-              <button
-                onClick={savePat}
-                disabled={patSaving}
-                className="px-4 py-2 text-sm font-display font-semibold rounded-lg bg-accent/10 text-accent border border-accent/20 hover:bg-accent/15 hover:border-accent/40 disabled:opacity-50 transition-all"
-              >
-                {patSaving ? "Testing..." : "Save & Test"}
-              </button>
-            </div>
-            {patStatus && (
-              <div className={`flex items-center gap-2 text-sm ${patStatus.ok ? "text-success" : "text-danger"}`}>
-                <div className={`w-1.5 h-1.5 rounded-full ${patStatus.ok ? "bg-success shadow-[0_0_4px_rgba(52,211,153,0.5)]" : "bg-danger shadow-[0_0_4px_rgba(248,113,113,0.5)]"}`} />
-                {patStatus.ok ? `Connected as ${patStatus.login}` : `Error: ${patStatus.error}`}
-              </div>
-            )}
-          </>
+          <a
+            href="/api/auth/github"
+            className="inline-flex items-center gap-2 px-4 py-2 text-sm font-display font-semibold rounded-lg bg-accent/10 text-accent border border-accent/20 hover:bg-accent/15 hover:border-accent/40 transition-all"
+          >
+            <svg className="w-4 h-4" viewBox="0 0 16 16" fill="currentColor"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z" /></svg>
+            Sign in with GitHub
+          </a>
         )}
       </section>
 

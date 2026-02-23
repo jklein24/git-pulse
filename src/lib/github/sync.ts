@@ -162,10 +162,10 @@ export async function syncRepo(repoId: number, opts?: { backfill?: boolean }): P
 
   log(repoFullName, `Starting sync (${isInitialSync ? `initial, cutoff=${cutoffDate}` : "incremental"})`);
 
-  const patRow = await db.select().from(settings).where(eq(settings.key, "github_pat")).get();
-  if (!patRow?.value) throw new Error("GitHub PAT not configured");
+  const tokenRow = await db.select().from(settings).where(eq(settings.key, "github_pat")).get();
+  if (!tokenRow?.value) throw new Error("GitHub not connected — sign in via Settings");
 
-  const client = createGitHubClient(patRow.value);
+  const client = createGitHubClient(tokenRow.value);
   const excludeGlobs = await getExcludeGlobs();
   const cutoff = Math.floor(Date.now() / 1000) - ONE_YEAR_SEC;
 

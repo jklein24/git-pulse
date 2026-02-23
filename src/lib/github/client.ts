@@ -13,12 +13,12 @@ export interface RateLimit {
   resetAt: string;
 }
 
-export function createGitHubClient(pat: string): GitHubClient {
+export function createGitHubClient(token: string): GitHubClient {
   return {
     graphql: graphql.defaults({
-      headers: { authorization: `token ${pat}` },
+      headers: { authorization: `token ${token}` },
     }),
-    rest: new Octokit({ auth: pat }),
+    rest: new Octokit({ auth: token }),
   };
 }
 
@@ -178,9 +178,9 @@ export async function fetchPRFiles(
   return files;
 }
 
-export async function testConnection(pat: string): Promise<{ ok: boolean; login?: string; error?: string }> {
+export async function testConnection(token: string): Promise<{ ok: boolean; login?: string; error?: string }> {
   try {
-    const client = createGitHubClient(pat);
+    const client = createGitHubClient(token);
     const { data } = await client.rest.users.getAuthenticated();
     return { ok: true, login: data.login };
   } catch (e: unknown) {
