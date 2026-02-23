@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback, Suspense } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
 import { useSettings } from "@/components/layout/SettingsContext";
+import { useAuth } from "@/components/layout/AuthContext";
 
 interface Repo {
   id: number;
@@ -22,6 +23,24 @@ interface SyncJob {
   error: string | null;
 }
 
+interface WorkspacePat {
+  id: number;
+  label: string;
+  githubLogin: string | null;
+  createdAt: number;
+}
+
+interface Member {
+  id: number;
+  userId: number;
+  githubLogin: string;
+  displayName: string | null;
+  avatarUrl: string | null;
+  email: string | null;
+  role: string;
+  joinedAt: number;
+}
+
 const STATUS_STYLES: Record<string, string> = {
   COMPLETED: "bg-success/10 text-success border border-success/20",
   RUNNING: "bg-accent/10 text-accent border border-accent/20",
@@ -39,11 +58,23 @@ export default function SettingsPageWrapper() {
 function SettingsPage() {
   const searchParams = useSearchParams();
   const router = useRouter();
+  const { workspace, isAdmin } = useAuth();
 
   const [hasToken, setHasToken] = useState(false);
   const [githubLogin, setGithubLogin] = useState<string | null>(null);
   const [disconnecting, setDisconnecting] = useState(false);
   const [oauthBanner, setOauthBanner] = useState<{ type: "success" | "error"; message: string } | null>(null);
+
+  const [workspacePats, setWorkspacePats] = useState<WorkspacePat[]>([]);
+  const [newPatLabel, setNewPatLabel] = useState("");
+  const [newPatValue, setNewPatValue] = useState("");
+  const [addingPat, setAddingPat] = useState(false);
+  const [patError, setPatError] = useState("");
+
+  const [members, setMembers] = useState<Member[]>([]);
+  const [newMemberLogin, setNewMemberLogin] = useState("");
+  const [addingMember, setAddingMember] = useState(false);
+  const [memberError, setMemberError] = useState("");
 
   const [repos, setRepos] = useState<Repo[]>([]);
   const [newRepoInput, setNewRepoInput] = useState("");
@@ -117,6 +148,86 @@ function SettingsPage() {
       setUnmappedEmails(d.unmappedEmails || []);
     });
   }, []);
+
+  useEffect(() => {
+    if (!workspace) return;
+    fetch(`/api/workspaces/${workspace.id}/members`).then((r) => r.ok ? r.json() : []).then(setMembers);
+    if (isAdmin) {
+      fetch(`/api/workspaces/${workspace.id}/pats`).then((r) => r.ok ? r.json() : []).then(setWorkspacePats);
+    }
+  }, [workspace, isAdmin]);
+
+  const addWorkspacePat = async () => {
+    if (!workspace || !newPatLabel.trim() || !newPatValue.trim()) return;
+    setAddingPat(true);
+    setPatError("");
+    try {
+      const res = await fetch(`/api/workspaces/${workspace.id}/pats`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ label: newPatLabel.trim(), pat: newPatValue.trim() }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setPatError(data.error);
+        return;
+      }
+      setWorkspacePats((prev) => [...prev, data]);
+      setNewPatLabel("");
+      setNewPatValue("");
+    } catch {
+      setPatError("Failed to add PAT");
+    } finally {
+      setAddingPat(false);
+    }
+  };
+
+  const removeWorkspacePat = async (patId: number) => {
+    if (!workspace) return;
+    await fetch(`/api/workspaces/${workspace.id}/pats?patId=${patId}`, { method: "DELETE" });
+    setWorkspacePats((prev) => prev.filter((p) => p.id !== patId));
+  };
+
+  const addMember = async () => {
+    if (!workspace || !newMemberLogin.trim()) return;
+    setAddingMember(true);
+    setMemberError("");
+    try {
+      const res = await fetch(`/api/workspaces/${workspace.id}/members`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ githubLogin: newMemberLogin.trim() }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setMemberError(data.error);
+        return;
+      }
+      setNewMemberLogin("");
+      const updated = await fetch(`/api/workspaces/${workspace.id}/members`).then((r) => r.json());
+      setMembers(updated);
+    } catch {
+      setMemberError("Failed to add member");
+    } finally {
+      setAddingMember(false);
+    }
+  };
+
+  const removeMember = async (memberId: number) => {
+    if (!workspace) return;
+    await fetch(`/api/workspaces/${workspace.id}/members?memberId=${memberId}`, { method: "DELETE" });
+    setMembers((prev) => prev.filter((m) => m.id !== memberId));
+  };
+
+  const changeMemberRole = async (memberId: number, role: string) => {
+    if (!workspace) return;
+    await fetch(`/api/workspaces/${workspace.id}/members`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ memberId, role }),
+    });
+    setMembers((prev) => prev.map((m) => m.id === memberId ? { ...m, role } : m));
+  };
 
   const disconnect = useCallback(async () => {
     setDisconnecting(true);
@@ -310,12 +421,63 @@ function SettingsPage() {
     <div className="max-w-3xl space-y-8">
       <h1 className="text-2xl font-display font-bold tracking-tight">Settings</h1>
 
-      {oauthBanner && (
-        <div className={`flex items-center gap-2 px-4 py-3 rounded-lg text-sm ${oauthBanner.type === "success" ? "bg-success/10 text-success border border-success/20" : "bg-danger/10 text-danger border border-danger/20"}`}>
-          <div className={`w-1.5 h-1.5 rounded-full shrink-0 ${oauthBanner.type === "success" ? "bg-success" : "bg-danger"}`} />
-          {oauthBanner.message}
-          <button onClick={() => setOauthBanner(null)} className="ml-auto text-xs opacity-60 hover:opacity-100 transition-opacity">&times;</button>
-        </div>
+      {isAdmin && (
+        <section className="bg-bg-secondary rounded-xl border border-border p-6 space-y-4">
+          <h2 className="text-[11px] font-display font-semibold uppercase tracking-widest text-text-muted">
+            GitHub Access Tokens
+          </h2>
+          <p className="text-xs text-text-muted">
+            Add Personal Access Tokens with <code className="text-xs font-mono bg-bg-tertiary px-1 py-0.5 rounded">repo</code> scope to sync PR data. Add one per GitHub org if you have repos across multiple orgs.
+          </p>
+          {workspacePats.length > 0 && (
+            <div className="space-y-2">
+              {workspacePats.map((p) => (
+                <div key={p.id} className="flex items-center justify-between py-2 px-3 bg-bg-tertiary rounded-lg border border-border">
+                  <div className="flex items-center gap-3">
+                    <span className="text-sm font-medium text-text-primary">{p.label}</span>
+                    {p.githubLogin && (
+                      <span className="text-xs font-mono text-text-muted">@{p.githubLogin}</span>
+                    )}
+                  </div>
+                  <button
+                    onClick={() => removeWorkspacePat(p.id)}
+                    className="text-danger/60 hover:text-danger text-xs font-display font-semibold transition-colors"
+                  >
+                    Remove
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+          <div className="flex gap-2">
+            <input
+              value={newPatLabel}
+              onChange={(e) => setNewPatLabel(e.target.value)}
+              placeholder="Label (e.g. my-org)"
+              className="w-40 px-3 py-2 text-sm bg-bg-tertiary border border-border rounded-lg text-text-primary placeholder:text-text-muted focus:outline-none focus:border-accent/40 transition-all"
+            />
+            <input
+              type="password"
+              value={newPatValue}
+              onChange={(e) => setNewPatValue(e.target.value)}
+              placeholder="ghp_..."
+              className="flex-1 px-3 py-2 text-sm font-mono bg-bg-tertiary border border-border rounded-lg text-text-primary placeholder:text-text-muted focus:outline-none focus:border-accent/40 transition-all"
+            />
+            <button
+              onClick={addWorkspacePat}
+              disabled={addingPat || !newPatLabel.trim() || !newPatValue.trim()}
+              className="px-4 py-2 text-sm font-display font-semibold rounded-lg bg-accent/10 text-accent border border-accent/20 hover:bg-accent/15 hover:border-accent/40 disabled:opacity-50 transition-all"
+            >
+              {addingPat ? "Adding..." : "Add"}
+            </button>
+          </div>
+          {patError && (
+            <div className="flex items-center gap-2 text-sm text-danger">
+              <div className="w-1.5 h-1.5 rounded-full bg-danger" />
+              {patError}
+            </div>
+          )}
+        </section>
       )}
 
       <section className="bg-bg-secondary rounded-xl border border-border p-6 space-y-4">
@@ -347,25 +509,102 @@ function SettingsPage() {
         )}
       </section>
 
+      {isAdmin && (
+        <section className="bg-bg-secondary rounded-xl border border-border p-6 space-y-4">
+          <h2 className="text-[11px] font-display font-semibold uppercase tracking-widest text-text-muted">
+            Workspace Members
+          </h2>
+          <div className="flex gap-2">
+            <input
+              value={newMemberLogin}
+              onChange={(e) => setNewMemberLogin(e.target.value)}
+              onKeyDown={(e) => e.key === "Enter" && addMember()}
+              placeholder="GitHub username"
+              className="flex-1 px-3 py-2 text-sm font-mono bg-bg-tertiary border border-border rounded-lg text-text-primary placeholder:text-text-muted focus:outline-none focus:border-accent/40 transition-all"
+            />
+            <button
+              onClick={addMember}
+              disabled={addingMember || !newMemberLogin.trim()}
+              className="px-4 py-2 text-sm font-display font-semibold rounded-lg bg-accent/10 text-accent border border-accent/20 hover:bg-accent/15 hover:border-accent/40 disabled:opacity-50 transition-all"
+            >
+              {addingMember ? "Inviting..." : "Invite"}
+            </button>
+          </div>
+          {memberError && (
+            <div className="flex items-center gap-2 text-sm text-danger">
+              <div className="w-1.5 h-1.5 rounded-full bg-danger" />
+              {memberError}
+            </div>
+          )}
+          {members.length > 0 && (
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="text-left text-[11px] font-display font-semibold text-text-muted uppercase tracking-widest border-b border-border">
+                  <th className="pb-3">Member</th>
+                  <th className="pb-3">Role</th>
+                  <th className="pb-3 text-right">Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                {members.map((m) => (
+                  <tr key={m.id} className="border-b border-border/40">
+                    <td className="py-3">
+                      <div className="flex items-center gap-2">
+                        {m.avatarUrl ? (
+                          <img src={m.avatarUrl} alt="" className="w-6 h-6 rounded-full" />
+                        ) : (
+                          <div className="w-6 h-6 rounded-full bg-bg-tertiary" />
+                        )}
+                        <span className="font-mono font-medium text-text-primary">{m.githubLogin}</span>
+                      </div>
+                    </td>
+                    <td className="py-3">
+                      <select
+                        value={m.role}
+                        onChange={(e) => changeMemberRole(m.id, e.target.value)}
+                        className="bg-bg-tertiary border border-border rounded px-2 py-1 text-xs text-text-primary"
+                      >
+                        <option value="member">Member</option>
+                        <option value="admin">Admin</option>
+                      </select>
+                    </td>
+                    <td className="py-3 text-right">
+                      <button
+                        onClick={() => removeMember(m.id)}
+                        className="text-danger/60 hover:text-danger text-xs font-display font-semibold transition-colors"
+                      >
+                        Remove
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+        </section>
+      )}
+
       <section className="bg-bg-secondary rounded-xl border border-border p-6 space-y-4">
         <h2 className="text-[11px] font-display font-semibold uppercase tracking-widest text-text-muted">
           Repositories
         </h2>
-        <div className="flex gap-2">
-          <input
-            value={newRepoInput}
-            onChange={(e) => setNewRepoInput(e.target.value)}
-            onKeyDown={(e) => e.key === "Enter" && addRepo()}
-            placeholder="owner/repo"
-            className="flex-1 px-3 py-2 text-sm font-mono bg-bg-tertiary border border-border rounded-lg text-text-primary placeholder:text-text-muted focus:outline-none focus:border-accent/40 focus:shadow-[0_0_0_2px_rgba(34,211,238,0.08)] transition-all"
-          />
-          <button
-            onClick={addRepo}
-            className="px-4 py-2 text-sm font-display font-semibold rounded-lg bg-accent/10 text-accent border border-accent/20 hover:bg-accent/15 hover:border-accent/40 transition-all"
-          >
-            Add
-          </button>
-        </div>
+        {isAdmin && (
+          <div className="flex gap-2">
+            <input
+              value={newRepoInput}
+              onChange={(e) => setNewRepoInput(e.target.value)}
+              onKeyDown={(e) => e.key === "Enter" && addRepo()}
+              placeholder="owner/repo"
+              className="flex-1 px-3 py-2 text-sm font-mono bg-bg-tertiary border border-border rounded-lg text-text-primary placeholder:text-text-muted focus:outline-none focus:border-accent/40 focus:shadow-[0_0_0_2px_rgba(34,211,238,0.08)] transition-all"
+            />
+            <button
+              onClick={addRepo}
+              className="px-4 py-2 text-sm font-display font-semibold rounded-lg bg-accent/10 text-accent border border-accent/20 hover:bg-accent/15 hover:border-accent/40 transition-all"
+            >
+              Add
+            </button>
+          </div>
+        )}
         {repos.length === 0 ? (
           <p className="text-sm text-text-muted">No repositories added yet.</p>
         ) : (
@@ -387,30 +626,34 @@ function SettingsPage() {
                       : "Never"}
                   </td>
                   <td className="py-3 text-right space-x-3">
-                    <button
-                      onClick={() => syncRepo(repo.id)}
-                      disabled={syncingRepos.has(repo.id)}
-                      className="text-accent hover:text-accent-hover text-xs font-display font-semibold transition-colors cursor-pointer disabled:cursor-not-allowed disabled:opacity-50"
-                    >
-                      {syncingRepos.has(repo.id) ? (
-                        <span className="inline-flex items-center gap-1.5">
-                          <span className="inline-block w-3 h-3 border-2 border-accent/30 border-t-accent rounded-full animate-spin" />
-                          Syncing…
-                        </span>
-                      ) : "Sync"}
-                    </button>
-                    <button
-                      onClick={() => removeRepo(repo.id)}
-                      disabled={removingRepos.has(repo.id) || syncingRepos.size > 0}
-                      className="text-danger/60 hover:text-danger text-xs font-display font-semibold transition-colors cursor-pointer disabled:cursor-not-allowed disabled:opacity-50"
-                    >
-                      {removingRepos.has(repo.id) ? (
-                        <span className="inline-flex items-center gap-1.5">
-                          <span className="inline-block w-3 h-3 border-2 border-danger/30 border-t-danger rounded-full animate-spin" />
-                          Removing…
-                        </span>
-                      ) : "Remove"}
-                    </button>
+                    {isAdmin && (
+                      <>
+                        <button
+                          onClick={() => syncRepo(repo.id)}
+                          disabled={syncingRepos.has(repo.id)}
+                          className="text-accent hover:text-accent-hover text-xs font-display font-semibold transition-colors cursor-pointer disabled:cursor-not-allowed disabled:opacity-50"
+                        >
+                          {syncingRepos.has(repo.id) ? (
+                            <span className="inline-flex items-center gap-1.5">
+                              <span className="inline-block w-3 h-3 border-2 border-accent/30 border-t-accent rounded-full animate-spin" />
+                              Syncing…
+                            </span>
+                          ) : "Sync"}
+                        </button>
+                        <button
+                          onClick={() => removeRepo(repo.id)}
+                          disabled={removingRepos.has(repo.id) || syncingRepos.size > 0}
+                          className="text-danger/60 hover:text-danger text-xs font-display font-semibold transition-colors cursor-pointer disabled:cursor-not-allowed disabled:opacity-50"
+                        >
+                          {removingRepos.has(repo.id) ? (
+                            <span className="inline-flex items-center gap-1.5">
+                              <span className="inline-block w-3 h-3 border-2 border-danger/30 border-t-danger rounded-full animate-spin" />
+                              Removing…
+                            </span>
+                          ) : "Remove"}
+                        </button>
+                      </>
+                    )}
                   </td>
                 </tr>
               ))}
@@ -447,7 +690,7 @@ function SettingsPage() {
         </div>
       </section>
 
-      <section className="bg-bg-secondary rounded-xl border border-border p-6 space-y-4">
+      {isAdmin && <section className="bg-bg-secondary rounded-xl border border-border p-6 space-y-4">
         <h2 className="text-[11px] font-display font-semibold uppercase tracking-widest text-text-muted">
           File Exclusion Patterns
         </h2>
@@ -479,9 +722,9 @@ function SettingsPage() {
             ))}
           </div>
         )}
-      </section>
+      </section>}
 
-      <section className="bg-bg-secondary rounded-xl border border-border p-6 space-y-4">
+      {isAdmin && <section className="bg-bg-secondary rounded-xl border border-border p-6 space-y-4">
         <h2 className="text-[11px] font-display font-semibold uppercase tracking-widest text-text-muted">
           Churn Configuration
         </h2>
@@ -495,9 +738,9 @@ function SettingsPage() {
             className="w-20 px-3 py-2 text-sm font-mono bg-bg-tertiary border border-border rounded-lg text-text-primary focus:outline-none focus:border-accent/40 focus:shadow-[0_0_0_2px_rgba(34,211,238,0.08)] transition-all"
           />
         </div>
-      </section>
+      </section>}
 
-      <section className="bg-bg-secondary rounded-xl border border-border p-6 space-y-4">
+      {isAdmin && <section className="bg-bg-secondary rounded-xl border border-border p-6 space-y-4">
         <h2 className="text-[11px] font-display font-semibold uppercase tracking-widest text-text-muted">
           Claude Code Analytics
         </h2>
@@ -553,9 +796,9 @@ function SettingsPage() {
               : `Synced ${claudeSyncResult.recordsProcessed} records${claudeSyncResult.unmappedEmails && claudeSyncResult.unmappedEmails.length > 0 ? ` (${claudeSyncResult.unmappedEmails.length} unmapped emails)` : ""}`}
           </div>
         )}
-      </section>
+      </section>}
 
-      <section className="bg-bg-secondary rounded-xl border border-border p-6 space-y-4">
+      {isAdmin && <section className="bg-bg-secondary rounded-xl border border-border p-6 space-y-4">
         <h2 className="text-[11px] font-display font-semibold uppercase tracking-widest text-text-muted">
           Jira Integration
         </h2>
@@ -642,9 +885,9 @@ function SettingsPage() {
               : `Synced ${jiraSyncResult.issuesProcessed} issues${jiraSyncResult.unmappedAssignees && jiraSyncResult.unmappedAssignees.length > 0 ? ` (${jiraSyncResult.unmappedAssignees.length} unmapped assignees)` : ""}`}
           </div>
         )}
-      </section>
+      </section>}
 
-      <section className="bg-bg-secondary rounded-xl border border-border p-6 space-y-4">
+      {isAdmin && <section className="bg-bg-secondary rounded-xl border border-border p-6 space-y-4">
         <div className="flex items-center justify-between">
           <h2 className="text-[11px] font-display font-semibold uppercase tracking-widest text-text-muted">
             Identity Mapping
@@ -703,7 +946,7 @@ function SettingsPage() {
             </tbody>
           </table>
         )}
-      </section>
+      </section>}
 
       <section className="bg-bg-secondary rounded-xl border border-border p-6 space-y-4">
         <h2 className="text-[11px] font-display font-semibold uppercase tracking-widest text-text-muted">

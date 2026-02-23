@@ -1,14 +1,16 @@
-import { sql, and, gte, lte, eq } from "drizzle-orm";
+import { sql, and, gte, lte, eq, inArray } from "drizzle-orm";
 import { getDb } from "../db";
 import { claudeCodeUsage, claudeCodeModelUsage, pullRequests } from "../db/schema";
 import { formatDate, MONDAY_OFFSET } from "./utils";
+import { getWorkspaceRepoIds } from "../db/workspace-scope";
 
 function weekExpr(dateField: typeof claudeCodeUsage.date) {
-  const unix = sql<number>`cast(strftime('%s', ${dateField}) as integer)`;
+  const unix = sql<number>`extract(epoch from ${dateField}::date)::integer`;
   return sql<number>`((${unix} + ${MONDAY_OFFSET}) - ((${unix} + ${MONDAY_OFFSET}) % 604800)) - ${MONDAY_OFFSET}`;
 }
 
-export async function getCostTrend(startDate: number, endDate: number) {
+export async function getCostTrend(workspaceId: number, startDate: number, endDate: number) {
+  const repoIds = await getWorkspaceRepoIds(workspaceId);
   const db = getDb();
   const startStr = formatDate(startDate);
   const endStr = formatDate(endDate);
@@ -21,9 +23,21 @@ export async function getCostTrend(startDate: number, endDate: number) {
       aiPrs: sql<number>`sum(${claudeCodeUsage.prsByClaudeCode})`.as("ai_prs"),
     })
     .from(claudeCodeUsage)
-    .where(and(gte(claudeCodeUsage.date, startStr), lte(claudeCodeUsage.date, endStr)))
+    .where(and(eq(claudeCodeUsage.workspaceId, workspaceId), gte(claudeCodeUsage.date, startStr), lte(claudeCodeUsage.date, endStr)))
     .groupBy(sql`week`)
     .orderBy(sql`week`);
+
+  if (repoIds.length === 0) {
+    return costByWeek.map((r) => {
+      const totalCost = (r.totalCostCents ?? 0) / 100;
+      return {
+        week: formatDate(r.week),
+        totalCost,
+        costPerPr: 0,
+        costPer1kLoc: 0,
+      };
+    });
+  }
 
   const prsByWeek = await db
     .select({
@@ -33,6 +47,7 @@ export async function getCostTrend(startDate: number, endDate: number) {
     .from(pullRequests)
     .where(
       and(
+        inArray(pullRequests.repoId, repoIds),
         eq(pullRequests.state, "MERGED"),
         gte(pullRequests.mergedAt, startDate),
         lte(pullRequests.mergedAt, endDate),
@@ -55,7 +70,7 @@ export async function getCostTrend(startDate: number, endDate: number) {
   });
 }
 
-export async function getCostByModel(startDate: number, endDate: number) {
+export async function getCostByModel(workspaceId: number, startDate: number, endDate: number) {
   const db = getDb();
   const startStr = formatDate(startDate);
   const endStr = formatDate(endDate);
@@ -69,7 +84,7 @@ export async function getCostByModel(startDate: number, endDate: number) {
     })
     .from(claudeCodeModelUsage)
     .innerJoin(claudeCodeUsage, eq(claudeCodeModelUsage.usageId, claudeCodeUsage.id))
-    .where(and(gte(claudeCodeUsage.date, startStr), lte(claudeCodeUsage.date, endStr)))
+    .where(and(eq(claudeCodeUsage.workspaceId, workspaceId), gte(claudeCodeUsage.date, startStr), lte(claudeCodeUsage.date, endStr)))
     .groupBy(claudeCodeModelUsage.model)
     .orderBy(sql`cost_cents desc`);
 }

@@ -3,7 +3,7 @@ import { getDb } from "../db";
 import { jiraIssues, users } from "../db/schema";
 import { MONDAY_OFFSET, formatDate } from "./utils";
 
-export async function getTicketThroughput(startDate: number, endDate: number) {
+export async function getTicketThroughput(workspaceId: number, startDate: number, endDate: number) {
   const db = getDb();
 
   const rows = await db
@@ -14,6 +14,7 @@ export async function getTicketThroughput(startDate: number, endDate: number) {
     .from(jiraIssues)
     .where(
       and(
+        eq(jiraIssues.workspaceId, workspaceId),
         eq(jiraIssues.status, "Done"),
         isNotNull(jiraIssues.resolvedAt),
         gte(jiraIssues.resolvedAt, startDate),
@@ -29,7 +30,7 @@ export async function getTicketThroughput(startDate: number, endDate: number) {
   }));
 }
 
-export async function getTicketsResolvedPerPerson(startDate: number, endDate: number) {
+export async function getTicketsResolvedPerPerson(workspaceId: number, startDate: number, endDate: number) {
   const db = getDb();
 
   return db
@@ -43,6 +44,7 @@ export async function getTicketsResolvedPerPerson(startDate: number, endDate: nu
     .innerJoin(users, eq(jiraIssues.userId, users.id))
     .where(
       and(
+        eq(jiraIssues.workspaceId, workspaceId),
         eq(jiraIssues.status, "Done"),
         isNotNull(jiraIssues.resolvedAt),
         gte(jiraIssues.resolvedAt, startDate),
@@ -53,7 +55,7 @@ export async function getTicketsResolvedPerPerson(startDate: number, endDate: nu
     .orderBy(sql`resolved DESC`);
 }
 
-export async function getTicketCycleTime(startDate: number, endDate: number) {
+export async function getTicketCycleTime(workspaceId: number, startDate: number, endDate: number) {
   const db = getDb();
 
   const rows = await db
@@ -66,6 +68,7 @@ export async function getTicketCycleTime(startDate: number, endDate: number) {
     .from(jiraIssues)
     .where(
       and(
+        eq(jiraIssues.workspaceId, workspaceId),
         eq(jiraIssues.status, "Done"),
         isNotNull(jiraIssues.resolvedAt),
         gte(jiraIssues.resolvedAt, startDate),
@@ -82,7 +85,7 @@ export async function getTicketCycleTime(startDate: number, endDate: number) {
   }));
 }
 
-export async function getTicketsByProject(startDate: number, endDate: number) {
+export async function getTicketsByProject(workspaceId: number, startDate: number, endDate: number) {
   const db = getDb();
 
   return db
@@ -95,6 +98,7 @@ export async function getTicketsByProject(startDate: number, endDate: number) {
     .from(jiraIssues)
     .where(
       and(
+        eq(jiraIssues.workspaceId, workspaceId),
         gte(jiraIssues.updatedAt, startDate),
         lte(jiraIssues.updatedAt, endDate),
       ),
@@ -103,38 +107,37 @@ export async function getTicketsByProject(startDate: number, endDate: number) {
     .orderBy(sql`resolved DESC`);
 }
 
-export async function getTicketDataQuality(startDate: number, endDate: number) {
+export async function getTicketDataQuality(workspaceId: number, startDate: number, endDate: number) {
   const db = getDb();
 
-  const total = await db
+  const rows = await db
     .select({ count: sql<number>`count(*)`.as("count") })
     .from(jiraIssues)
     .where(
       and(
+        eq(jiraIssues.workspaceId, workspaceId),
         eq(jiraIssues.status, "Done"),
         isNotNull(jiraIssues.resolvedAt),
         gte(jiraIssues.resolvedAt, startDate),
         lte(jiraIssues.resolvedAt, endDate),
       ),
-    )
-    .get();
+    );
+  const totalCount = rows[0]?.count ?? 0;
 
-  const unassigned = await db
+  const unassignedRows = await db
     .select({ count: sql<number>`count(*)`.as("count") })
     .from(jiraIssues)
     .where(
       and(
+        eq(jiraIssues.workspaceId, workspaceId),
         eq(jiraIssues.status, "Done"),
         isNotNull(jiraIssues.resolvedAt),
         gte(jiraIssues.resolvedAt, startDate),
         lte(jiraIssues.resolvedAt, endDate),
         sql`${jiraIssues.assigneeEmail} is null`,
       ),
-    )
-    .get();
-
-  const totalCount = total?.count ?? 0;
-  const unassignedCount = unassigned?.count ?? 0;
+    );
+  const unassignedCount = unassignedRows[0]?.count ?? 0;
 
   return {
     totalResolved: totalCount,

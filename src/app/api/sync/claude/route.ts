@@ -1,42 +1,49 @@
-import { NextResponse } from "next/server";
-import { eq } from "drizzle-orm";
-import { getDb } from "@/lib/db";
-import { settings } from "@/lib/db/schema";
+import { NextRequest, NextResponse } from "next/server";
 import { syncClaudeCodeData, remapClaudeUsageUsers } from "@/lib/claude/sync";
+import { getWorkspaceSetting } from "@/lib/db/workspace-scope";
+import { requireAuth, handleAuthError, AuthError } from "@/lib/auth/middleware";
+
+export const maxDuration = 300;
 
 let syncInProgress = false;
 
-export async function POST() {
-  if (syncInProgress) {
-    return NextResponse.json({ error: "Claude sync already in progress" }, { status: 409 });
-  }
-
-  syncInProgress = true;
-
+export async function POST(request: NextRequest) {
   try {
-    const result = await syncClaudeCodeData();
-    if (result.unmappedEmails.length > 0) {
-      await remapClaudeUsageUsers();
+    const auth = await requireAuth(request);
+
+    if (syncInProgress) {
+      return NextResponse.json({ error: "Claude sync already in progress" }, { status: 409 });
     }
-    return NextResponse.json(result);
-  } catch (e: unknown) {
-    const msg = e instanceof Error ? e.message : "Unknown error";
-    return NextResponse.json({ error: msg }, { status: 500 });
-  } finally {
-    syncInProgress = false;
+
+    syncInProgress = true;
+
+    try {
+      const result = await syncClaudeCodeData(auth.workspace.id);
+      if (result.unmappedEmails.length > 0) {
+        await remapClaudeUsageUsers();
+      }
+      return NextResponse.json(result);
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : "Unknown error";
+      return NextResponse.json({ error: msg }, { status: 500 });
+    } finally {
+      syncInProgress = false;
+    }
+  } catch (error) {
+    return handleAuthError(error);
   }
 }
 
-export async function GET() {
-  const db = getDb();
-  const lastSynced = await db
-    .select()
-    .from(settings)
-    .where(eq(settings.key, "claude_last_synced"))
-    .get();
+export async function GET(request: NextRequest) {
+  try {
+    const auth = await requireAuth(request);
+    const lastSynced = await getWorkspaceSetting(auth.workspace.id, "claude_last_synced");
 
-  return NextResponse.json({
-    lastSynced: lastSynced?.value || null,
-    syncInProgress,
-  });
+    return NextResponse.json({
+      lastSynced: lastSynced || null,
+      syncInProgress,
+    });
+  } catch (error) {
+    return handleAuthError(error);
+  }
 }

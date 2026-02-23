@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import Anthropic from "@anthropic-ai/sdk";
-import { getReadOnlyDb } from "@/lib/ai/read-only-db";
+import { getReadOnlySql } from "@/lib/ai/read-only-db";
 import { SCHEMA_DESCRIPTION } from "@/lib/ai/schema-description";
+import { requireAuth, handleAuthError, AuthError } from "@/lib/auth/middleware";
 
 const client = new Anthropic();
 
@@ -11,7 +12,7 @@ const MAX_RESULT_LENGTH = 50_000;
 
 const QUERY_DB_TOOL: Anthropic.Tool = {
   name: "query_db",
-  description: "Execute a read-only SQL query against the productivity SQLite database. Only SELECT queries are allowed. The settings table cannot be queried.",
+  description: "Execute a read-only SQL query against the productivity PostgreSQL database. Only SELECT queries are allowed. The settings table cannot be queried.",
   input_schema: {
     type: "object" as const,
     properties: {
@@ -21,7 +22,7 @@ const QUERY_DB_TOOL: Anthropic.Tool = {
   },
 };
 
-function executeQuery(sqlQuery: string): string {
+async function executeQuery(sqlQuery: string): Promise<string> {
   const trimmed = sqlQuery.trim();
 
   if (!/^SELECT\b/i.test(trimmed)) {
@@ -35,8 +36,8 @@ function executeQuery(sqlQuery: string): string {
   }
 
   try {
-    const db = getReadOnlyDb();
-    const rows = db.prepare(trimmed).all();
+    const sql = getReadOnlySql();
+    const rows = await sql.unsafe(trimmed);
     let result = JSON.stringify(rows, null, 2);
     if (result.length > MAX_RESULT_LENGTH) {
       result = result.slice(0, MAX_RESULT_LENGTH) + "\n... (truncated)";
@@ -49,24 +50,26 @@ function executeQuery(sqlQuery: string): string {
 }
 
 export async function POST(request: NextRequest) {
-  const { question } = await request.json();
-  if (!question || typeof question !== "string") {
-    return NextResponse.json({ error: "question is required" }, { status: 400 });
-  }
-  if (question.length > MAX_QUESTION_LENGTH) {
-    return NextResponse.json({ error: `Question too long (max ${MAX_QUESTION_LENGTH} chars)` }, { status: 400 });
-  }
-
-  const messages: Anthropic.MessageParam[] = [
-    { role: "user", content: question },
-  ];
-
   try {
+    const auth = await requireAuth(request);
+
+    const { question } = await request.json();
+    if (!question || typeof question !== "string") {
+      return NextResponse.json({ error: "question is required" }, { status: 400 });
+    }
+    if (question.length > MAX_QUESTION_LENGTH) {
+      return NextResponse.json({ error: `Question too long (max ${MAX_QUESTION_LENGTH} chars)` }, { status: 400 });
+    }
+
+    const messages: Anthropic.MessageParam[] = [
+      { role: "user", content: question },
+    ];
+
     for (let turn = 0; turn < MAX_TURNS; turn++) {
       const response = await client.messages.create({
         model: "claude-sonnet-4-6",
         max_tokens: 4096,
-        system: `You are a helpful data analyst for an engineering team's GitHub productivity dashboard. You have access to a SQLite database via the query_db tool.
+        system: `You are a helpful data analyst for an engineering team's GitHub productivity dashboard. You have access to a PostgreSQL database via the query_db tool.
 
 ${SCHEMA_DESCRIPTION}
 
@@ -89,11 +92,15 @@ Guidelines:
 
         messages.push({ role: "assistant", content: response.content });
 
-        const toolResults: Anthropic.ToolResultBlockParam[] = toolUseBlocks.map(block => ({
-          type: "tool_result" as const,
-          tool_use_id: block.id,
-          content: executeQuery((block.input as { sql: string }).sql),
-        }));
+        const toolResults: Anthropic.ToolResultBlockParam[] = [];
+        for (const block of toolUseBlocks) {
+          const content = await executeQuery((block.input as { sql: string }).sql);
+          toolResults.push({
+            type: "tool_result" as const,
+            tool_use_id: block.id,
+            content,
+          });
+        }
 
         messages.push({ role: "user", content: toolResults });
         continue;
@@ -108,8 +115,11 @@ Guidelines:
     }
 
     return NextResponse.json({ error: "Too many tool calls. Please try a simpler question." }, { status: 500 });
-  } catch (err: unknown) {
-    const msg = err instanceof Error ? err.message : String(err);
+  } catch (error) {
+    if (error instanceof AuthError) {
+      return handleAuthError(error);
+    }
+    const msg = error instanceof Error ? error.message : String(error);
     return NextResponse.json({ error: msg }, { status: 500 });
   }
 }

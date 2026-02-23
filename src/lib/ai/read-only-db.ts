@@ -1,13 +1,12 @@
-import Database from "better-sqlite3";
-import path from "path";
+import postgres from "postgres";
 
-const DB_PATH = path.join(process.cwd(), "data", "productivity.db");
+let _sql: ReturnType<typeof postgres> | null = null;
 
-let _readonlyDb: Database.Database | null = null;
-
-export function getReadOnlyDb(): Database.Database {
-  if (!_readonlyDb) {
-    _readonlyDb = new Database(DB_PATH, { readonly: true });
+export function getReadOnlySql(): ReturnType<typeof postgres> {
+  if (!_sql) {
+    const url = process.env.DATABASE_URL;
+    if (!url) throw new Error("DATABASE_URL environment variable is required");
+    _sql = postgres(url);
   }
-  return _readonlyDb;
+  return _sql;
 }

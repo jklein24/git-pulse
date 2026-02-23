@@ -1,6 +1,8 @@
 import { eq, and, sql } from "drizzle-orm";
 import { getDb } from "../db";
-import { repos, users, pullRequests, prFiles, prReviews, syncJobs, settings } from "../db/schema";
+import { repos, users, pullRequests, prFiles, prReviews, syncJobs, workspacePats } from "../db/schema";
+import { getWorkspaceSetting } from "../db/workspace-scope";
+import { decrypt } from "../auth/encryption";
 import { createGitHubClient, fetchPullRequests, fetchPRFiles, type PullRequestNode, type RateLimit } from "./client";
 import { transformPR, transformReview, isFileExcluded, computeFilteredStats, toUnix } from "./transforms";
 
@@ -18,15 +20,29 @@ function logRate(repo: string, rateLimit: RateLimit) {
   );
 }
 
-async function getExcludeGlobs(): Promise<string[]> {
-  const db = getDb();
-  const row = await db.select().from(settings).where(eq(settings.key, "exclude_globs")).get();
-  if (!row?.value) return [];
+async function getExcludeGlobs(workspaceId: number): Promise<string[]> {
+  const value = await getWorkspaceSetting(workspaceId, "exclude_globs");
+  if (!value) return [];
   try {
-    return JSON.parse(row.value);
+    return JSON.parse(value);
   } catch {
     return [];
   }
+}
+
+async function getPatForRepo(workspaceId: number): Promise<string> {
+  const db = getDb();
+  const pats = await db
+    .select({ encryptedPat: workspacePats.encryptedPat })
+    .from(workspacePats)
+    .where(eq(workspacePats.workspaceId, workspaceId))
+    .limit(1);
+
+  if (pats.length === 0 || !pats[0].encryptedPat) {
+    throw new Error("No GitHub PAT configured for this workspace");
+  }
+
+  return decrypt(pats[0].encryptedPat);
 }
 
 async function upsertUser(
@@ -36,7 +52,7 @@ async function upsertUser(
   const db = getDb();
   const now = Math.floor(Date.now() / 1000);
 
-  const existing = await db.select().from(users).where(eq(users.githubLogin, author.login)).get();
+  const existing = (await db.select().from(users).where(eq(users.githubLogin, author.login)))[0];
   if (existing) {
     if (author.avatarUrl && author.avatarUrl !== existing.avatarUrl) {
       await db.update(users).set({ avatarUrl: author.avatarUrl }).where(eq(users.id, existing.id));
@@ -67,7 +83,7 @@ async function processPR(
   const authorId = await upsertUser(pr.author);
   const transformed = transformPR(pr);
 
-  const existing = await db.select().from(pullRequests).where(eq(pullRequests.githubId, pr.databaseId)).get();
+  const existing = (await db.select().from(pullRequests).where(eq(pullRequests.githubId, pr.databaseId)))[0];
 
   let prId: number;
   const isNew = !existing;
@@ -94,7 +110,7 @@ async function processPR(
     const transformedReview = transformReview(review);
 
     const existingReview = review.databaseId
-      ? await db.select().from(prReviews).where(eq(prReviews.githubId, review.databaseId)).get()
+      ? (await db.select().from(prReviews).where(eq(prReviews.githubId, review.databaseId)))[0]
       : null;
 
     if (!existingReview) {
@@ -152,7 +168,7 @@ async function processPR(
 
 export async function syncRepo(repoId: number, opts?: { backfill?: boolean }): Promise<void> {
   const db = getDb();
-  const repo = await db.select().from(repos).where(eq(repos.id, repoId)).get();
+  const repo = (await db.select().from(repos).where(eq(repos.id, repoId)))[0];
   if (!repo) throw new Error(`Repo ${repoId} not found`);
 
   const repoFullName = repo.fullName;
@@ -162,11 +178,9 @@ export async function syncRepo(repoId: number, opts?: { backfill?: boolean }): P
 
   log(repoFullName, `Starting sync (${isInitialSync ? `initial, cutoff=${cutoffDate}` : "incremental"})`);
 
-  const tokenRow = await db.select().from(settings).where(eq(settings.key, "github_pat")).get();
-  if (!tokenRow?.value) throw new Error("GitHub not connected — sign in via Settings");
-
-  const client = createGitHubClient(tokenRow.value);
-  const excludeGlobs = await getExcludeGlobs();
+  const pat = await getPatForRepo(repo.workspaceId);
+  const client = createGitHubClient(pat);
+  const excludeGlobs = await getExcludeGlobs(repo.workspaceId);
   const cutoff = Math.floor(Date.now() / 1000) - ONE_YEAR_SEC;
 
   if (excludeGlobs.length > 0) {
@@ -174,6 +188,7 @@ export async function syncRepo(repoId: number, opts?: { backfill?: boolean }): P
   }
 
   const job = await db.insert(syncJobs).values({
+    workspaceId: repo.workspaceId,
     repoId,
     status: "RUNNING",
     startedAt: Math.floor(Date.now() / 1000),
@@ -220,10 +235,9 @@ export async function syncRepo(repoId: number, opts?: { backfill?: boolean }): P
           continue;
         }
 
-        const existing = await db.select({ state: pullRequests.state })
+        const existing = (await db.select({ state: pullRequests.state })
           .from(pullRequests)
-          .where(eq(pullRequests.githubId, pr.databaseId))
-          .get();
+          .where(eq(pullRequests.githubId, pr.databaseId)))[0];
         if (existing?.state === "MERGED") {
           consecutiveMerged++;
           totalSkipped++;
@@ -253,7 +267,7 @@ export async function syncRepo(repoId: number, opts?: { backfill?: boolean }): P
     }
 
     const now = Math.floor(Date.now() / 1000);
-    const elapsed = now - (await db.select().from(syncJobs).where(eq(syncJobs.id, jobId)).get())!.startedAt;
+    const elapsed = now - (await db.select().from(syncJobs).where(eq(syncJobs.id, jobId)))[0]!.startedAt;
 
     log(repoFullName, `Sync complete in ${elapsed}s: ${totalProcessed} PRs (${totalNew} new, ${totalUpdated} updated, ${totalSkipped} skipped-merged), ${totalFiles} files fetched`);
 
@@ -276,9 +290,9 @@ export async function syncRepo(repoId: number, opts?: { backfill?: boolean }): P
   }
 }
 
-export async function syncAllRepos(): Promise<void> {
+export async function syncWorkspaceRepos(workspaceId: number): Promise<void> {
   const db = getDb();
-  const allRepos = await db.select().from(repos);
+  const allRepos = await db.select().from(repos).where(eq(repos.workspaceId, workspaceId));
   console.log(`[sync] Starting sync for ${allRepos.length} repo(s): ${allRepos.map((r) => r.fullName).join(", ")}`);
 
   for (const repo of allRepos) {
@@ -288,23 +302,46 @@ export async function syncAllRepos(): Promise<void> {
   console.log(`[sync] All repos synced.`);
 }
 
-export async function recomputeFilteredStats(): Promise<void> {
+export async function recomputeFilteredStats(workspaceId: number): Promise<void> {
   const db = getDb();
-  const excludeGlobs = await getExcludeGlobs();
+  const excludeGlobs = await getExcludeGlobs(workspaceId);
+  const workspaceRepos = await db
+    .select({ id: repos.id })
+    .from(repos)
+    .where(eq(repos.workspaceId, workspaceId));
+  const repoIds = workspaceRepos.map((r) => r.id);
+
+  if (repoIds.length === 0) return;
+
+  const { inArray } = await import("drizzle-orm");
 
   if (excludeGlobs.length > 0) {
-    const allFiles = await db.select().from(prFiles);
-    for (const file of allFiles) {
+    const allFiles = await db
+      .select()
+      .from(prFiles)
+      .innerJoin(pullRequests, eq(prFiles.prId, pullRequests.id))
+      .where(inArray(pullRequests.repoId, repoIds));
+    for (const { pr_files: file } of allFiles) {
       const excluded = isFileExcluded(file.filename, excludeGlobs);
       if (excluded !== file.isExcluded) {
         await db.update(prFiles).set({ isExcluded: excluded }).where(eq(prFiles.id, file.id));
       }
     }
   } else {
-    await db.update(prFiles).set({ isExcluded: false });
+    const allFiles = await db
+      .select({ fileId: prFiles.id })
+      .from(prFiles)
+      .innerJoin(pullRequests, eq(prFiles.prId, pullRequests.id))
+      .where(inArray(pullRequests.repoId, repoIds));
+    for (const { fileId } of allFiles) {
+      await db.update(prFiles).set({ isExcluded: false }).where(eq(prFiles.id, fileId));
+    }
   }
 
-  const prs = await db.select({ id: pullRequests.id }).from(pullRequests);
+  const prs = await db
+    .select({ id: pullRequests.id })
+    .from(pullRequests)
+    .where(inArray(pullRequests.repoId, repoIds));
   for (const pr of prs) {
     const files = await db.select().from(prFiles).where(eq(prFiles.prId, pr.id));
     const stats = computeFilteredStats(files);

@@ -1,5 +1,5 @@
 export const SCHEMA_DESCRIPTION = `
-The SQLite database has the following tables:
+The PostgreSQL database has the following tables:
 
 1. repos
    - id: integer (primary key, auto-increment)
@@ -25,7 +25,7 @@ The SQLite database has the following tables:
    - title: text
    - author_id: integer (foreign key -> users.id, nullable)
    - state: text (one of: "OPEN", "MERGED", "CLOSED")
-   - is_draft: integer (0 or 1)
+   - is_draft: boolean
    - created_at: integer (unix timestamp)
    - published_at: integer (unix timestamp, nullable — when draft was marked ready)
    - merged_at: integer (unix timestamp, nullable)
@@ -44,7 +44,7 @@ The SQLite database has the following tables:
    - status: text (nullable, e.g. "added", "modified", "removed")
    - additions: integer
    - deletions: integer
-   - is_excluded: integer (0 or 1 — whether this file is excluded by glob patterns)
+   - is_excluded: boolean (whether this file is excluded by glob patterns)
    - patch: text (nullable, diff patch)
 
 5. pr_reviews
@@ -64,10 +64,11 @@ The SQLite database has the following tables:
    - prs_processed: integer (default 0)
    - error: text (nullable)
 
-7. settings
-   - key: text (primary key)
+7. workspace_settings
+   - workspace_id: integer (foreign key -> workspaces.id)
+   - key: text
    - value: text (nullable)
-   NOTE: The settings table is off-limits. Do not query it.
+   - NOTE: The workspace_settings table is off-limits. Do not query it.
 
 8. jira_issues
    - id: integer (primary key, auto-increment)

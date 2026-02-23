@@ -1,6 +1,7 @@
 import { eq, and } from "drizzle-orm";
 import { getDb } from "../db";
-import { users, settings, claudeCodeUsage, claudeCodeModelUsage } from "../db/schema";
+import { users, claudeCodeUsage, claudeCodeModelUsage } from "../db/schema";
+import { getWorkspaceSetting, setWorkspaceSetting } from "../db/workspace-scope";
 import { fetchAllClaudeCodeUsage, type ClaudeCodeUsageRecord } from "./client";
 
 function log(...args: unknown[]) {
@@ -25,6 +26,7 @@ function buildEmailToUserMap(allUsers: { id: number; email: string | null }[]): 
 async function upsertUsageRecord(
   record: ClaudeCodeUsageRecord,
   emailToUser: Map<string, number>,
+  workspaceId: number,
 ): Promise<boolean> {
   const db = getDb();
   const rawEmail = record.actor?.email_address;
@@ -44,6 +46,7 @@ async function upsertUsageRecord(
   const totalOutput = models.reduce((sum, m) => sum + (m.tokens?.output ?? 0), 0);
 
   const values = {
+    workspaceId,
     userId,
     email,
     date,
@@ -70,7 +73,7 @@ async function upsertUsageRecord(
     .select({ id: claudeCodeUsage.id })
     .from(claudeCodeUsage)
     .where(and(eq(claudeCodeUsage.email, email), eq(claudeCodeUsage.date, date)))
-    .get();
+    .then(rows => rows[0]);
 
   let usageId: number;
   if (existing) {
@@ -98,21 +101,21 @@ async function upsertUsageRecord(
   return true;
 }
 
-export async function syncClaudeCodeData(): Promise<{ recordsProcessed: number; unmappedEmails: string[] }> {
+export async function syncClaudeCodeData(workspaceId: number): Promise<{ recordsProcessed: number; unmappedEmails: string[] }> {
   const db = getDb();
 
-  const apiKeyRow = await db.select().from(settings).where(eq(settings.key, "claude_admin_api_key")).get();
-  if (!apiKeyRow?.value) throw new Error("Claude Admin API key not configured");
+  const apiKey = await getWorkspaceSetting(workspaceId, "claude_admin_api_key");
+  if (!apiKey) throw new Error("Claude Admin API key not configured");
 
-  const lastSyncRow = await db.select().from(settings).where(eq(settings.key, "claude_last_synced")).get();
+  const lastSynced = await getWorkspaceSetting(workspaceId, "claude_last_synced");
 
   const sixMonthsAgo = new Date();
   sixMonthsAgo.setMonth(sixMonthsAgo.getMonth() - 6);
-  const startingAt = lastSyncRow?.value || sixMonthsAgo.toISOString().slice(0, 10);
+  const startingAt = lastSynced || sixMonthsAgo.toISOString().slice(0, 10);
 
   log(`Fetching Claude Code usage from ${startingAt}`);
 
-  const records = await fetchAllClaudeCodeUsage(apiKeyRow.value, startingAt);
+  const records = await fetchAllClaudeCodeUsage(apiKey, startingAt);
   log(`Fetched ${records.length} usage records`);
 
   const allUsers = await db
@@ -124,7 +127,7 @@ export async function syncClaudeCodeData(): Promise<{ recordsProcessed: number; 
   let processed = 0;
 
   for (const record of records) {
-    const saved = await upsertUsageRecord(record, emailToUser);
+    const saved = await upsertUsageRecord(record, emailToUser, workspaceId);
     if (!saved) continue;
     processed++;
 
@@ -134,12 +137,8 @@ export async function syncClaudeCodeData(): Promise<{ recordsProcessed: number; 
     }
   }
 
-  const yesterday = new Date(Date.now() - 86400000);
-  const lastSyncValue = yesterday.toISOString().slice(0, 10);
-  await db
-    .insert(settings)
-    .values({ key: "claude_last_synced", value: lastSyncValue })
-    .onConflictDoUpdate({ target: settings.key, set: { value: lastSyncValue } });
+  const now = new Date().toISOString().slice(0, 10);
+  await setWorkspaceSetting(workspaceId, "claude_last_synced", now);
 
   log(`Sync complete: ${processed} records processed, ${unmappedEmails.size} unmapped emails`);
 
@@ -151,15 +150,9 @@ export async function remapClaudeUsageUsers(): Promise<number> {
   const allUsers = await db.select({ id: users.id, email: users.email }).from(users);
   const emailToUser = buildEmailToUserMap(allUsers);
 
-  const unmapped = await db
-    .select({ id: claudeCodeUsage.id, email: claudeCodeUsage.email })
-    .from(claudeCodeUsage)
-    .where(eq(claudeCodeUsage.userId, 0));
-
   const nullMapped = await db
     .select({ id: claudeCodeUsage.id, email: claudeCodeUsage.email })
-    .from(claudeCodeUsage)
-    .all();
+    .from(claudeCodeUsage);
 
   let remapped = 0;
   for (const row of nullMapped) {

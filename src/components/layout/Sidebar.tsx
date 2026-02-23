@@ -4,6 +4,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useState } from "react";
 import { useSettings } from "./SettingsContext";
+import { useAuth } from "./AuthContext";
 
 function DashboardIcon({ className }: { className?: string }) {
   return (
@@ -109,7 +110,9 @@ const HIDDEN_WHEN_INDIVIDUAL = ["/leaderboard", "/outliers"];
 export default function Sidebar() {
   const pathname = usePathname();
   const [collapsed, setCollapsed] = useState(false);
+  const [showWorkspaceSwitcher, setShowWorkspaceSwitcher] = useState(false);
   const { hideIndividualMetrics } = useSettings();
+  const { workspace, workspaces, user, switchWorkspace, logout } = useAuth();
 
   const visibleItems = hideIndividualMetrics
     ? NAV_ITEMS.filter((item) => !HIDDEN_WHEN_INDIVIDUAL.includes(item.href))
@@ -147,6 +150,51 @@ export default function Sidebar() {
         </button>
       </div>
 
+      {!collapsed && workspace && (
+        <div className="px-3 py-3 border-b border-border">
+          <button
+            onClick={() => workspaces.length > 1 && setShowWorkspaceSwitcher(!showWorkspaceSwitcher)}
+            className={`w-full flex items-center gap-2 px-2 py-1.5 rounded-lg text-left ${
+              workspaces.length > 1
+                ? "hover:bg-bg-tertiary cursor-pointer"
+                : "cursor-default"
+            } transition-colors`}
+          >
+            <div className="w-6 h-6 rounded bg-accent/10 flex items-center justify-center text-accent text-xs font-display font-bold flex-shrink-0">
+              {workspace.name.charAt(0).toUpperCase()}
+            </div>
+            <span className="text-sm text-text-primary font-medium truncate">
+              {workspace.name}
+            </span>
+            {workspaces.length > 1 && (
+              <svg className="w-3 h-3 text-text-muted ml-auto flex-shrink-0" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round">
+                <path d="M3 5l3 3 3-3" />
+              </svg>
+            )}
+          </button>
+          {showWorkspaceSwitcher && workspaces.length > 1 && (
+            <div className="mt-1 py-1 bg-bg-tertiary rounded-lg border border-border">
+              {workspaces.map((ws) => (
+                <button
+                  key={ws.id}
+                  onClick={() => {
+                    switchWorkspace(ws.id);
+                    setShowWorkspaceSwitcher(false);
+                  }}
+                  className={`w-full px-3 py-1.5 text-left text-sm transition-colors ${
+                    ws.id === workspace.id
+                      ? "text-accent bg-accent/5"
+                      : "text-text-secondary hover:bg-bg-secondary"
+                  }`}
+                >
+                  {ws.name}
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
       <nav className="flex-1 py-3 space-y-0.5 px-2">
         {visibleItems.map((item) => {
           const active = pathname.startsWith(item.href);
@@ -168,6 +216,32 @@ export default function Sidebar() {
           );
         })}
       </nav>
+
+      {!collapsed && user && (
+        <div className="px-3 py-3 border-t border-border">
+          <div className="flex items-center gap-2 px-2">
+            {user.avatarUrl ? (
+              <img src={user.avatarUrl} alt="" className="w-6 h-6 rounded-full flex-shrink-0" />
+            ) : (
+              <div className="w-6 h-6 rounded-full bg-bg-tertiary flex-shrink-0" />
+            )}
+            <span className="text-xs text-text-secondary truncate flex-1">
+              {user.displayName || user.githubLogin}
+            </span>
+            <button
+              onClick={logout}
+              className="text-text-muted hover:text-danger transition-colors p-0.5 flex-shrink-0"
+              title="Sign out"
+            >
+              <svg className="w-3.5 h-3.5" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M5 12H3a1 1 0 01-1-1V3a1 1 0 011-1h2" />
+                <path d="M9 10l3-3-3-3" />
+                <path d="M12 7H5" />
+              </svg>
+            </button>
+          </div>
+        </div>
+      )}
     </aside>
   );
 }

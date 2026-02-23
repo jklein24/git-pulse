@@ -1,6 +1,7 @@
-import { eq, and } from "drizzle-orm";
+import { eq } from "drizzle-orm";
 import { getDb } from "../db";
-import { users, settings, jiraIssues } from "../db/schema";
+import { users, jiraIssues } from "../db/schema";
+import { getWorkspaceSetting, setWorkspaceSetting } from "../db/workspace-scope";
 import { fetchAllJiraIssues, type JiraIssueNode } from "./client";
 
 function log(...args: unknown[]) {
@@ -27,15 +28,17 @@ function buildEmailToUserMap(allUsers: { id: number; email: string | null }[]): 
 async function upsertIssue(
   issue: JiraIssueNode,
   emailToUser: Map<string, number>,
+  workspaceId: number,
+  cloudId: string,
 ): Promise<boolean> {
   const db = getDb();
   const f = issue.fields;
 
   const assigneeEmail = f.assignee?.emailAddress?.toLowerCase() ?? null;
   const userId = assigneeEmail ? (emailToUser.get(assigneeEmail) ?? null) : null;
-  const cloudId = await db.select().from(settings).where(eq(settings.key, "jira_cloud_id")).get();
 
   const values = {
+    workspaceId,
     jiraKey: issue.key,
     projectKey: f.project?.key ?? issue.key.split("-")[0],
     summary: f.summary,
@@ -48,14 +51,14 @@ async function upsertIssue(
     createdAt: parseIsoToUnix(f.created) ?? Math.floor(Date.now() / 1000),
     updatedAt: parseIsoToUnix(f.updated),
     resolvedAt: parseIsoToUnix(f.resolutiondate),
-    url: cloudId?.value ? `https://${cloudId.value}/browse/${issue.key}` : null,
+    url: cloudId ? `https://${cloudId}/browse/${issue.key}` : null,
   };
 
   const existing = await db
     .select({ id: jiraIssues.id })
     .from(jiraIssues)
     .where(eq(jiraIssues.jiraKey, issue.key))
-    .get();
+    .then(rows => rows[0]);
 
   if (existing) {
     await db.update(jiraIssues).set(values).where(eq(jiraIssues.id, existing.id));
@@ -65,31 +68,26 @@ async function upsertIssue(
   return true;
 }
 
-export async function syncJiraData(): Promise<{
+export async function syncJiraData(workspaceId: number): Promise<{
   issuesProcessed: number;
   unmappedAssignees: string[];
 }> {
   const db = getDb();
 
-  const cloudIdRow = await db.select().from(settings).where(eq(settings.key, "jira_cloud_id")).get();
-  const tokenRow = await db.select().from(settings).where(eq(settings.key, "jira_api_token")).get();
-  const emailRow = await db.select().from(settings).where(eq(settings.key, "jira_user_email")).get();
-  const projectsRow = await db.select().from(settings).where(eq(settings.key, "jira_projects")).get();
+  const cloudId = await getWorkspaceSetting(workspaceId, "jira_cloud_id");
+  const apiToken = await getWorkspaceSetting(workspaceId, "jira_api_token");
+  const userEmail = await getWorkspaceSetting(workspaceId, "jira_user_email");
+  const projects = await getWorkspaceSetting(workspaceId, "jira_projects") || "SP, AT, ENG, PE, SEC, LP";
 
-  if (!cloudIdRow?.value || !tokenRow?.value || !emailRow?.value) {
+  if (!cloudId || !apiToken || !userEmail) {
     throw new Error("Jira credentials not configured (need cloud ID, API token, and user email)");
   }
 
-  const cloudId = cloudIdRow.value;
-  const apiToken = tokenRow.value;
-  const userEmail = emailRow.value;
-  const projects = projectsRow?.value || "SP, AT, ENG, PE, SEC, LP";
-
-  const lastSyncRow = await db.select().from(settings).where(eq(settings.key, "jira_last_synced")).get();
+  const lastSynced = await getWorkspaceSetting(workspaceId, "jira_last_synced");
 
   const sixMonthsAgo = new Date();
   sixMonthsAgo.setMonth(sixMonthsAgo.getMonth() - 6);
-  const sinceDate = lastSyncRow?.value || sixMonthsAgo.toISOString().slice(0, 10);
+  const sinceDate = lastSynced || sixMonthsAgo.toISOString().slice(0, 10);
 
   log(`Fetching Jira issues from ${sinceDate} for projects: ${projects}`);
 
@@ -106,7 +104,7 @@ export async function syncJiraData(): Promise<{
   let processed = 0;
 
   for (const issue of issues) {
-    await upsertIssue(issue, emailToUser);
+    await upsertIssue(issue, emailToUser, workspaceId, cloudId);
     processed++;
 
     const email = issue.fields.assignee?.emailAddress?.toLowerCase();
@@ -116,10 +114,7 @@ export async function syncJiraData(): Promise<{
   }
 
   const today = new Date().toISOString().slice(0, 10);
-  await db
-    .insert(settings)
-    .values({ key: "jira_last_synced", value: today })
-    .onConflictDoUpdate({ target: settings.key, set: { value: today } });
+  await setWorkspaceSetting(workspaceId, "jira_last_synced", today);
 
   log(`Sync complete: ${processed} issues processed, ${unmappedAssignees.size} unmapped assignees`);
 
@@ -133,8 +128,7 @@ export async function remapJiraUsers(): Promise<number> {
 
   const unmapped = await db
     .select({ id: jiraIssues.id, assigneeEmail: jiraIssues.assigneeEmail })
-    .from(jiraIssues)
-    .all();
+    .from(jiraIssues);
 
   let remapped = 0;
   for (const row of unmapped) {

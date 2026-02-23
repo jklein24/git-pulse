@@ -1,18 +1,19 @@
-import { sql, and, gte, lte, eq } from "drizzle-orm";
+import { sql, and, gte, lte, eq, inArray } from "drizzle-orm";
 import { getDb } from "../db";
 import { claudeCodeUsage, claudeCodeModelUsage, users, pullRequests } from "../db/schema";
 import { formatDate, MONDAY_OFFSET } from "./utils";
+import { getWorkspaceRepoIds } from "../db/workspace-scope";
 
 function dateToUnix(dateStr: string): number {
   return Math.floor(new Date(dateStr + "T00:00:00Z").getTime() / 1000);
 }
 
 function weekExpr(dateField: typeof claudeCodeUsage.date) {
-  const unix = sql<number>`cast(strftime('%s', ${dateField}) as integer)`;
+  const unix = sql<number>`extract(epoch from ${dateField}::date)::integer`;
   return sql<number>`((${unix} + ${MONDAY_OFFSET}) - ((${unix} + ${MONDAY_OFFSET}) % 604800)) - ${MONDAY_OFFSET}`;
 }
 
-export async function getTeamAiUsageTrend(startDate: number, endDate: number) {
+export async function getTeamAiUsageTrend(workspaceId: number, startDate: number, endDate: number) {
   const db = getDb();
   const startStr = formatDate(startDate);
   const endStr = formatDate(endDate);
@@ -28,12 +29,13 @@ export async function getTeamAiUsageTrend(startDate: number, endDate: number) {
       prs: sql<number>`sum(${claudeCodeUsage.prsByClaudeCode})`.as("prs"),
     })
     .from(claudeCodeUsage)
-    .where(and(gte(claudeCodeUsage.date, startStr), lte(claudeCodeUsage.date, endStr)))
+    .where(and(eq(claudeCodeUsage.workspaceId, workspaceId), gte(claudeCodeUsage.date, startStr), lte(claudeCodeUsage.date, endStr)))
     .groupBy(sql`week`)
     .orderBy(sql`week`);
 }
 
-export async function getAiVsHumanOutput(startDate: number, endDate: number) {
+export async function getAiVsHumanOutput(workspaceId: number, startDate: number, endDate: number) {
+  const repoIds = await getWorkspaceRepoIds(workspaceId);
   const db = getDb();
   const startStr = formatDate(startDate);
   const endStr = formatDate(endDate);
@@ -44,9 +46,18 @@ export async function getAiVsHumanOutput(startDate: number, endDate: number) {
       aiLines: sql<number>`sum(${claudeCodeUsage.linesAdded} + ${claudeCodeUsage.linesRemoved})`.as("ai_lines"),
     })
     .from(claudeCodeUsage)
-    .where(and(gte(claudeCodeUsage.date, startStr), lte(claudeCodeUsage.date, endStr)))
+    .where(and(eq(claudeCodeUsage.workspaceId, workspaceId), gte(claudeCodeUsage.date, startStr), lte(claudeCodeUsage.date, endStr)))
     .groupBy(sql`week`)
     .orderBy(sql`week`);
+
+  if (repoIds.length === 0) {
+    return aiRows.map((r) => ({
+      week: formatDate(r.week),
+      humanLines: 0,
+      aiLines: r.aiLines ?? 0,
+      aiPercent: 100,
+    }));
+  }
 
   const humanRows = await db
     .select({
@@ -56,6 +67,7 @@ export async function getAiVsHumanOutput(startDate: number, endDate: number) {
     .from(pullRequests)
     .where(
       and(
+        inArray(pullRequests.repoId, repoIds),
         eq(pullRequests.state, "MERGED"),
         gte(pullRequests.mergedAt, startDate),
         lte(pullRequests.mergedAt, endDate),
@@ -81,7 +93,7 @@ export async function getAiVsHumanOutput(startDate: number, endDate: number) {
   });
 }
 
-export async function getToolAcceptanceTrend(startDate: number, endDate: number) {
+export async function getToolAcceptanceTrend(workspaceId: number, startDate: number, endDate: number) {
   const db = getDb();
   const startStr = formatDate(startDate);
   const endStr = formatDate(endDate);
@@ -97,12 +109,12 @@ export async function getToolAcceptanceTrend(startDate: number, endDate: number)
       multiEditRejected: sql<number>`sum(${claudeCodeUsage.multiEditToolRejected})`.as("multi_edit_rejected"),
     })
     .from(claudeCodeUsage)
-    .where(and(gte(claudeCodeUsage.date, startStr), lte(claudeCodeUsage.date, endStr)))
+    .where(and(eq(claudeCodeUsage.workspaceId, workspaceId), gte(claudeCodeUsage.date, startStr), lte(claudeCodeUsage.date, endStr)))
     .groupBy(sql`week`)
     .orderBy(sql`week`);
 }
 
-export async function getPerPersonAiStats(startDate: number, endDate: number) {
+export async function getPerPersonAiStats(workspaceId: number, startDate: number, endDate: number) {
   const db = getDb();
   const startStr = formatDate(startDate);
   const endStr = formatDate(endDate);
@@ -122,12 +134,12 @@ export async function getPerPersonAiStats(startDate: number, endDate: number) {
     })
     .from(claudeCodeUsage)
     .innerJoin(users, eq(claudeCodeUsage.userId, users.id))
-    .where(and(gte(claudeCodeUsage.date, startStr), lte(claudeCodeUsage.date, endStr)))
+    .where(and(eq(claudeCodeUsage.workspaceId, workspaceId), gte(claudeCodeUsage.date, startStr), lte(claudeCodeUsage.date, endStr)))
     .groupBy(users.githubLogin)
     .orderBy(sql`sessions desc`);
 }
 
-export async function getAdoptionHeatmap(startDate: number, endDate: number) {
+export async function getAdoptionHeatmap(workspaceId: number, startDate: number, endDate: number) {
   const db = getDb();
   const startStr = formatDate(startDate);
   const endStr = formatDate(endDate);
@@ -140,12 +152,13 @@ export async function getAdoptionHeatmap(startDate: number, endDate: number) {
     })
     .from(claudeCodeUsage)
     .innerJoin(users, eq(claudeCodeUsage.userId, users.id))
-    .where(and(gte(claudeCodeUsage.date, startStr), lte(claudeCodeUsage.date, endStr)))
+    .where(and(eq(claudeCodeUsage.workspaceId, workspaceId), gte(claudeCodeUsage.date, startStr), lte(claudeCodeUsage.date, endStr)))
     .groupBy(users.githubLogin, sql`week`)
     .orderBy(sql`week`);
 }
 
-export async function getAiSummaryCards(startDate: number, endDate: number) {
+export async function getAiSummaryCards(workspaceId: number, startDate: number, endDate: number) {
+  const repoIds = await getWorkspaceRepoIds(workspaceId);
   const db = getDb();
   const startStr = formatDate(startDate);
   const endStr = formatDate(endDate);
@@ -160,8 +173,19 @@ export async function getAiSummaryCards(startDate: number, endDate: number) {
       activeAiUsers: sql<number>`count(distinct ${claudeCodeUsage.email})`.as("active_ai_users"),
     })
     .from(claudeCodeUsage)
-    .where(and(gte(claudeCodeUsage.date, startStr), lte(claudeCodeUsage.date, endStr)))
-    .get();
+    .where(and(eq(claudeCodeUsage.workspaceId, workspaceId), gte(claudeCodeUsage.date, startStr), lte(claudeCodeUsage.date, endStr)))
+    .then(rows => rows[0]);
+
+  if (repoIds.length === 0) {
+    const accepted = aiStats?.accepted ?? 0;
+    const rejected = aiStats?.rejected ?? 0;
+    return {
+      adoptionRate: 0,
+      aiAssistedPrs: aiStats?.aiPrs ?? 0,
+      costPerMergedPr: 0,
+      toolAcceptRate: accepted + rejected > 0 ? Math.round((accepted / (accepted + rejected)) * 1000) / 10 : 0,
+    };
+  }
 
   const totalContributors = await db
     .select({
@@ -170,12 +194,13 @@ export async function getAiSummaryCards(startDate: number, endDate: number) {
     .from(pullRequests)
     .where(
       and(
+        inArray(pullRequests.repoId, repoIds),
         eq(pullRequests.state, "MERGED"),
         gte(pullRequests.mergedAt, startDate),
         lte(pullRequests.mergedAt, endDate),
       ),
     )
-    .get();
+    .then(rows => rows[0]);
 
   const totalMergedPrs = await db
     .select({
@@ -184,12 +209,13 @@ export async function getAiSummaryCards(startDate: number, endDate: number) {
     .from(pullRequests)
     .where(
       and(
+        inArray(pullRequests.repoId, repoIds),
         eq(pullRequests.state, "MERGED"),
         gte(pullRequests.mergedAt, startDate),
         lte(pullRequests.mergedAt, endDate),
       ),
     )
-    .get();
+    .then(rows => rows[0]);
 
   const activeContributors = totalContributors?.count ?? 0;
   const activeAiUsers = aiStats?.activeAiUsers ?? 0;

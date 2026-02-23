@@ -1,7 +1,8 @@
-import { sql, and, gte, lte, eq, isNotNull } from "drizzle-orm";
+import { sql, and, gte, lte, eq, isNotNull, inArray } from "drizzle-orm";
 import { getDb } from "../db";
 import { pullRequests, prReviews, users, claudeCodeUsage } from "../db/schema";
 import { stddev, mean, rollingAverage, formatDate, MONDAY_OFFSET } from "./utils";
+import { getWorkspaceRepoIds } from "../db/workspace-scope";
 
 const EXCLUDED_LOGINS = new Set([
   "github-actions", "lightspark-bot", "cursor", "claude",
@@ -85,7 +86,10 @@ function detectTopBottom(data: PersonMetric[], metricName: string, n = 3): Outli
   return outliers;
 }
 
-export async function getOutliers(startDate: number, endDate: number): Promise<Outlier[]> {
+export async function getOutliers(workspaceId: number, startDate: number, endDate: number): Promise<Outlier[]> {
+  const repoIds = await getWorkspaceRepoIds(workspaceId);
+  if (repoIds.length === 0) return [];
+
   const db = getDb();
   const outliers: Outlier[] = [];
 
@@ -99,6 +103,7 @@ export async function getOutliers(startDate: number, endDate: number): Promise<O
     .innerJoin(users, eq(pullRequests.authorId, users.id))
     .where(
       and(
+        inArray(pullRequests.repoId, repoIds),
         eq(pullRequests.state, "MERGED"),
         gte(pullRequests.mergedAt, startDate),
         lte(pullRequests.mergedAt, endDate),
@@ -124,9 +129,11 @@ export async function getOutliers(startDate: number, endDate: number): Promise<O
       count: sql<number>`count(*)`.as("count"),
     })
     .from(prReviews)
+    .innerJoin(pullRequests, eq(prReviews.prId, pullRequests.id))
     .innerJoin(users, eq(prReviews.reviewerId, users.id))
     .where(
       and(
+        inArray(pullRequests.repoId, repoIds),
         isNotNull(prReviews.submittedAt),
         gte(prReviews.submittedAt, startDate),
         lte(prReviews.submittedAt, endDate),
@@ -155,6 +162,7 @@ export async function getOutliers(startDate: number, endDate: number): Promise<O
     .innerJoin(users, eq(pullRequests.authorId, users.id))
     .where(
       and(
+        inArray(pullRequests.repoId, repoIds),
         eq(pullRequests.state, "MERGED"),
         gte(pullRequests.mergedAt, startDate),
         lte(pullRequests.mergedAt, endDate),
@@ -187,7 +195,7 @@ export async function getOutliers(startDate: number, endDate: number): Promise<O
       })
       .from(claudeCodeUsage)
       .innerJoin(users, eq(claudeCodeUsage.userId, users.id))
-      .where(and(gte(claudeCodeUsage.date, startStr), lte(claudeCodeUsage.date, endStr)))
+      .where(and(eq(claudeCodeUsage.workspaceId, workspaceId), gte(claudeCodeUsage.date, startStr), lte(claudeCodeUsage.date, endStr)))
       .groupBy(users.githubLogin);
 
     if (aiSessionsData.length >= 3) {
@@ -255,7 +263,10 @@ export async function getOutliers(startDate: number, endDate: number): Promise<O
   });
 }
 
-export async function getTrendOutliers(endDate: number): Promise<Outlier[]> {
+export async function getTrendOutliers(workspaceId: number, endDate: number): Promise<Outlier[]> {
+  const repoIds = await getWorkspaceRepoIds(workspaceId);
+  if (repoIds.length === 0) return [];
+
   const oneWeek = 604800;
   const fourWeeks = 4 * oneWeek;
   const lastWeekStart = endDate - oneWeek;
@@ -275,6 +286,7 @@ export async function getTrendOutliers(endDate: number): Promise<Outlier[]> {
     .innerJoin(users, eq(pullRequests.authorId, users.id))
     .where(
       and(
+        inArray(pullRequests.repoId, repoIds),
         eq(pullRequests.state, "MERGED"),
         gte(pullRequests.mergedAt, rollingStart),
         lte(pullRequests.mergedAt, endDate),

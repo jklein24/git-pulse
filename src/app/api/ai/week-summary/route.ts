@@ -1,41 +1,44 @@
 import { NextRequest, NextResponse } from "next/server";
-import { eq } from "drizzle-orm";
 import Anthropic from "@anthropic-ai/sdk";
-import { getDb } from "@/lib/db";
-import { settings } from "@/lib/db/schema";
+import { getWorkspaceSetting, setWorkspaceSetting } from "@/lib/db/workspace-scope";
+import { requireAuth, handleAuthError, AuthError } from "@/lib/auth/middleware";
 
 const client = new Anthropic();
 
 export async function POST(request: NextRequest) {
-  const { weekStart, force } = await request.json();
-  if (!weekStart) {
-    return NextResponse.json({ error: "weekStart is required" }, { status: 400 });
-  }
-
-  const db = getDb();
-  const cacheKey = `week_summary_${weekStart}`;
-
-  if (!force) {
-    const cached = await db.select().from(settings).where(eq(settings.key, cacheKey));
-    if (cached.length > 0 && cached[0].value) {
-      return NextResponse.json({ summary: cached[0].value, cached: true });
-    }
-  }
-
-  const weekDetailUrl = new URL(`/api/metrics/week-detail?weekStart=${weekStart}`, request.url);
-  const weekData = await fetch(weekDetailUrl).then(r => r.json());
-
-  const weekLabel = new Date(weekStart * 1000).toLocaleDateString("en-US", {
-    month: "long",
-    day: "numeric",
-    year: "numeric",
-  });
-
-  const prSummaries = (weekData.prs || []).map((pr: Record<string, unknown>) =>
-    `- "${pr.title}" by ${pr.authorLogin} in ${pr.repoFullName} (+${pr.filteredAdditions ?? 0}/-${pr.filteredDeletions ?? 0})`
-  ).join("\n");
-
   try {
+    const auth = await requireAuth(request);
+
+    const { weekStart, force } = await request.json();
+    if (!weekStart) {
+      return NextResponse.json({ error: "weekStart is required" }, { status: 400 });
+    }
+
+    const workspaceId = auth.workspace.id;
+    const cacheKey = `week_summary_${weekStart}`;
+
+    if (!force) {
+      const cached = await getWorkspaceSetting(workspaceId, cacheKey);
+      if (cached) {
+        return NextResponse.json({ summary: cached, cached: true });
+      }
+    }
+
+    const weekDetailUrl = new URL(`/api/metrics/week-detail?weekStart=${weekStart}`, request.url);
+    const weekData = await fetch(weekDetailUrl, {
+      headers: { cookie: request.headers.get("cookie") || "" },
+    }).then(r => r.json());
+
+    const weekLabel = new Date(weekStart * 1000).toLocaleDateString("en-US", {
+      month: "long",
+      day: "numeric",
+      year: "numeric",
+    });
+
+    const prSummaries = (weekData.prs || []).map((pr: Record<string, unknown>) =>
+      `- "${pr.title}" by ${pr.authorLogin} in ${pr.repoFullName} (+${pr.filteredAdditions ?? 0}/-${pr.filteredDeletions ?? 0})`
+    ).join("\n");
+
     const response = await client.messages.create({
       model: "claude-sonnet-4-6",
       max_tokens: 1024,
@@ -62,13 +65,14 @@ Keep every bullet to one line. No paragraphs. Be factual and specific.`,
       .map(b => b.text)
       .join("");
 
-    await db.insert(settings)
-      .values({ key: cacheKey, value: resultText })
-      .onConflictDoUpdate({ target: settings.key, set: { value: resultText } });
+    await setWorkspaceSetting(workspaceId, cacheKey, resultText);
 
     return NextResponse.json({ summary: resultText, cached: false });
-  } catch (err: unknown) {
-    const msg = err instanceof Error ? err.message : String(err);
+  } catch (error) {
+    if (error instanceof AuthError) {
+      return handleAuthError(error);
+    }
+    const msg = error instanceof Error ? error.message : String(error);
     return NextResponse.json({ error: msg }, { status: 500 });
   }
 }

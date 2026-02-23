@@ -1,6 +1,7 @@
-import { sql, eq } from "drizzle-orm";
+import { sql, eq, and, inArray } from "drizzle-orm";
 import { getDb } from "../db";
 import { pullRequests, users, repos } from "../db/schema";
+import { getWorkspaceRepoIds } from "../db/workspace-scope";
 
 export interface OpenPR {
   number: number;
@@ -18,7 +19,10 @@ export interface OpenPR {
   ageBand: "green" | "yellow" | "orange" | "red";
 }
 
-export async function getOpenPRs(): Promise<OpenPR[]> {
+export async function getOpenPRs(workspaceId: number): Promise<OpenPR[]> {
+  const repoIds = await getWorkspaceRepoIds(workspaceId);
+  if (repoIds.length === 0) return [];
+
   const db = getDb();
   const now = Math.floor(Date.now() / 1000);
 
@@ -39,7 +43,7 @@ export async function getOpenPRs(): Promise<OpenPR[]> {
     .from(pullRequests)
     .innerJoin(repos, eq(pullRequests.repoId, repos.id))
     .leftJoin(users, eq(pullRequests.authorId, users.id))
-    .where(eq(pullRequests.state, "OPEN"))
+    .where(and(inArray(pullRequests.repoId, repoIds), eq(pullRequests.state, "OPEN")))
     .orderBy(pullRequests.createdAt);
 
   return rows.map((r) => {

@@ -1,6 +1,7 @@
-import { sql, and, gte, lte, eq } from "drizzle-orm";
+import { sql, and, gte, lte, eq, inArray } from "drizzle-orm";
 import { getDb } from "../db";
-import { pullRequests, prFiles, prReviews, users, settings } from "../db/schema";
+import { pullRequests, prFiles, prReviews, users } from "../db/schema";
+import { getWorkspaceRepoIds, getWorkspaceSetting } from "../db/workspace-scope";
 import { percentile, formatDate, MONDAY_OFFSET } from "./utils";
 import { scorePR, getBucket, type PRInput, type Bucket } from "./true-throughput-scoring";
 
@@ -61,14 +62,16 @@ export interface TrueThroughputDistribution {
   summary: { totalWeighted: number; totalRaw: number; medianScore: number; avgScore: number };
 }
 
-async function getChurnWindowSeconds(): Promise<number> {
-  const db = getDb();
-  const row = await db.select().from(settings).where(eq(settings.key, "churn_window_days")).get();
-  const days = row?.value ? parseInt(row.value) : 14;
+async function getChurnWindowSeconds(workspaceId: number): Promise<number> {
+  const value = await getWorkspaceSetting(workspaceId, "churn_window_days");
+  const days = value ? parseInt(value) : 14;
   return days * 86400;
 }
 
-export async function computeAllScores(startDate: number, endDate: number): Promise<ScoredPRWithMeta[]> {
+export async function computeAllScores(workspaceId: number, startDate: number, endDate: number): Promise<ScoredPRWithMeta[]> {
+  const repoIds = await getWorkspaceRepoIds(workspaceId);
+  if (repoIds.length === 0) return [];
+
   const db = getDb();
 
   const weekExpr = sql<number>`((${pullRequests.mergedAt} + ${MONDAY_OFFSET}) - ((${pullRequests.mergedAt} + ${MONDAY_OFFSET}) % 604800)) - ${MONDAY_OFFSET}`;
@@ -88,6 +91,7 @@ export async function computeAllScores(startDate: number, endDate: number): Prom
     .innerJoin(users, eq(pullRequests.authorId, users.id))
     .where(
       and(
+        inArray(pullRequests.repoId, repoIds),
         eq(pullRequests.state, "MERGED"),
         gte(pullRequests.mergedAt, startDate),
         lte(pullRequests.mergedAt, endDate),
@@ -120,7 +124,7 @@ export async function computeAllScores(startDate: number, endDate: number): Prom
 
   const reviewCountMap = new Map(reviewCounts.map((r) => [r.prId, r.reviewCount]));
 
-  const churnWindowSec = await getChurnWindowSeconds();
+  const churnWindowSec = await getChurnWindowSeconds(workspaceId);
 
   const allFiles = await db
     .select({

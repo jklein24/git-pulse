@@ -1,25 +1,28 @@
-import Database from "better-sqlite3";
-import { drizzle } from "drizzle-orm/better-sqlite3";
-import { migrate } from "drizzle-orm/better-sqlite3/migrator";
+import postgres from "postgres";
+import { drizzle } from "drizzle-orm/postgres-js";
+import { migrate } from "drizzle-orm/postgres-js/migrator";
 import path from "path";
-import fs from "fs";
 
-const DB_PATH = path.join(process.cwd(), "data", "productivity.db");
 const MIGRATIONS_PATH = path.join(process.cwd(), "drizzle");
 
-export function runMigrations() {
-  const dir = path.dirname(DB_PATH);
-  if (!fs.existsSync(dir)) {
-    fs.mkdirSync(dir, { recursive: true });
-  }
-  const sqlite = new Database(DB_PATH);
-  sqlite.pragma("journal_mode = WAL");
-  const db = drizzle(sqlite);
-  migrate(db, { migrationsFolder: MIGRATIONS_PATH });
-  sqlite.close();
+export async function runMigrations() {
+  const url = process.env.DATABASE_URL;
+  if (!url) throw new Error("DATABASE_URL environment variable is required");
+
+  const client = postgres(url, { max: 1 });
+  const db = drizzle(client);
+  await migrate(db, { migrationsFolder: MIGRATIONS_PATH });
+  await client.end();
 }
 
 if (require.main === module) {
-  runMigrations();
-  console.log("Migrations applied successfully");
+  runMigrations()
+    .then(() => {
+      console.log("Migrations applied successfully");
+      process.exit(0);
+    })
+    .catch((err) => {
+      console.error("Migration failed:", err);
+      process.exit(1);
+    });
 }

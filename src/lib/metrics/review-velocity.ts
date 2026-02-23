@@ -1,9 +1,13 @@
-import { sql, and, gte, lte, eq, isNotNull, ne } from "drizzle-orm";
+import { sql, and, gte, lte, eq, isNotNull, ne, inArray } from "drizzle-orm";
 import { getDb } from "../db";
 import { pullRequests, prReviews, users } from "../db/schema";
 import { median, formatDate, hoursFromSeconds, MONDAY_OFFSET } from "./utils";
+import { getWorkspaceRepoIds } from "../db/workspace-scope";
 
-export async function getReviewVelocityTrend(startDate: number, endDate: number) {
+export async function getReviewVelocityTrend(workspaceId: number, startDate: number, endDate: number) {
+  const repoIds = await getWorkspaceRepoIds(workspaceId);
+  if (repoIds.length === 0) return [];
+
   const db = getDb();
 
   const prs = await db
@@ -16,6 +20,7 @@ export async function getReviewVelocityTrend(startDate: number, endDate: number)
     .from(pullRequests)
     .where(
       and(
+        inArray(pullRequests.repoId, repoIds),
         isNotNull(pullRequests.publishedAt),
         gte(pullRequests.mergedAt, startDate),
         lte(pullRequests.mergedAt, endDate),

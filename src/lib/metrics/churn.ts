@@ -1,17 +1,20 @@
-import { sql, and, gte, lte, eq, ne, isNotNull } from "drizzle-orm";
+import { sql, and, gte, lte, eq, ne, isNotNull, inArray } from "drizzle-orm";
 import { getDb } from "../db";
-import { pullRequests, prFiles, settings } from "../db/schema";
+import { pullRequests, prFiles } from "../db/schema";
 import { formatDate, MONDAY_OFFSET } from "./utils";
+import { getWorkspaceRepoIds, getWorkspaceSetting } from "../db/workspace-scope";
 
-async function getChurnWindowDays(): Promise<number> {
-  const db = getDb();
-  const row = await db.select().from(settings).where(eq(settings.key, "churn_window_days")).get();
-  return row?.value ? parseInt(row.value) : 14;
+async function getChurnWindowDays(workspaceId: number): Promise<number> {
+  const value = await getWorkspaceSetting(workspaceId, "churn_window_days");
+  return value ? parseInt(value) : 14;
 }
 
-export async function getChurnRate(startDate: number, endDate: number) {
+export async function getChurnRate(workspaceId: number, startDate: number, endDate: number) {
+  const repoIds = await getWorkspaceRepoIds(workspaceId);
+  if (repoIds.length === 0) return [];
+
   const db = getDb();
-  const windowDays = await getChurnWindowDays();
+  const windowDays = await getChurnWindowDays(workspaceId);
   const windowSec = windowDays * 86400;
 
   const mergedPRs = await db
@@ -22,6 +25,7 @@ export async function getChurnRate(startDate: number, endDate: number) {
     .from(pullRequests)
     .where(
       and(
+        inArray(pullRequests.repoId, repoIds),
         eq(pullRequests.state, "MERGED"),
         isNotNull(pullRequests.mergedAt),
         gte(pullRequests.mergedAt, startDate),

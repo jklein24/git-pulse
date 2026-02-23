@@ -1,9 +1,13 @@
-import { sql, and, gte, lte, eq } from "drizzle-orm";
+import { sql, and, gte, lte, eq, inArray } from "drizzle-orm";
 import { getDb } from "../db";
 import { pullRequests, users } from "../db/schema";
 import { startOfWeek, formatDate, MONDAY_OFFSET } from "./utils";
+import { getWorkspaceRepoIds } from "../db/workspace-scope";
 
-export async function getTeamThroughput(startDate: number, endDate: number) {
+export async function getTeamThroughput(workspaceId: number, startDate: number, endDate: number) {
+  const repoIds = await getWorkspaceRepoIds(workspaceId);
+  if (repoIds.length === 0) return [];
+
   const db = getDb();
 
   const rows = await db
@@ -16,6 +20,7 @@ export async function getTeamThroughput(startDate: number, endDate: number) {
     .from(pullRequests)
     .where(
       and(
+        inArray(pullRequests.repoId, repoIds),
         eq(pullRequests.state, "MERGED"),
         gte(pullRequests.mergedAt, startDate),
         lte(pullRequests.mergedAt, endDate),
@@ -32,6 +37,7 @@ export async function getTeamThroughput(startDate: number, endDate: number) {
     .from(pullRequests)
     .where(
       and(
+        inArray(pullRequests.repoId, repoIds),
         eq(pullRequests.state, "MERGED"),
         gte(pullRequests.mergedAt, startDate),
         lte(pullRequests.mergedAt, endDate),
@@ -57,7 +63,10 @@ export async function getTeamThroughput(startDate: number, endDate: number) {
   });
 }
 
-export async function getPrsMergedPerPerson(startDate: number, endDate: number) {
+export async function getPrsMergedPerPerson(workspaceId: number, startDate: number, endDate: number) {
+  const repoIds = await getWorkspaceRepoIds(workspaceId);
+  if (repoIds.length === 0) return [];
+
   const db = getDb();
 
   return db
@@ -71,6 +80,7 @@ export async function getPrsMergedPerPerson(startDate: number, endDate: number) 
     .innerJoin(users, eq(pullRequests.authorId, users.id))
     .where(
       and(
+        inArray(pullRequests.repoId, repoIds),
         eq(pullRequests.state, "MERGED"),
         gte(pullRequests.mergedAt, startDate),
         lte(pullRequests.mergedAt, endDate),

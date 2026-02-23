@@ -1,9 +1,13 @@
-import { and, gte, lte, eq, isNotNull, sql } from "drizzle-orm";
+import { and, gte, lte, eq, isNotNull, sql, inArray } from "drizzle-orm";
 import { getDb } from "../db";
 import { pullRequests, users } from "../db/schema";
 import { median, percentile, mean as meanFn, formatDate, hoursFromSeconds, MONDAY_OFFSET } from "./utils";
+import { getWorkspaceRepoIds } from "../db/workspace-scope";
 
-export async function getMergeTimePerPerson(startDate: number, endDate: number) {
+export async function getMergeTimePerPerson(workspaceId: number, startDate: number, endDate: number) {
+  const repoIds = await getWorkspaceRepoIds(workspaceId);
+  if (repoIds.length === 0) return [];
+
   const db = getDb();
 
   const rows = await db
@@ -17,6 +21,7 @@ export async function getMergeTimePerPerson(startDate: number, endDate: number) 
     .innerJoin(users, eq(pullRequests.authorId, users.id))
     .where(
       and(
+        inArray(pullRequests.repoId, repoIds),
         eq(pullRequests.state, "MERGED"),
         isNotNull(pullRequests.publishedAt),
         isNotNull(pullRequests.mergedAt),
@@ -44,7 +49,10 @@ export async function getMergeTimePerPerson(startDate: number, endDate: number) 
   }));
 }
 
-export async function getMergeTimeTrend(startDate: number, endDate: number) {
+export async function getMergeTimeTrend(workspaceId: number, startDate: number, endDate: number) {
+  const repoIds = await getWorkspaceRepoIds(workspaceId);
+  if (repoIds.length === 0) return [];
+
   const db = getDb();
 
   const rows = await db
@@ -56,6 +64,7 @@ export async function getMergeTimeTrend(startDate: number, endDate: number) {
     .from(pullRequests)
     .where(
       and(
+        inArray(pullRequests.repoId, repoIds),
         eq(pullRequests.state, "MERGED"),
         isNotNull(pullRequests.publishedAt),
         isNotNull(pullRequests.mergedAt),
@@ -99,7 +108,10 @@ function sizeBucket(loc: number): string {
   return SIZE_BUCKETS[SIZE_BUCKETS.length - 1].label;
 }
 
-export async function getMergeTimeBySize(startDate: number, endDate: number) {
+export async function getMergeTimeBySize(workspaceId: number, startDate: number, endDate: number) {
+  const repoIds = await getWorkspaceRepoIds(workspaceId);
+  if (repoIds.length === 0) return SIZE_BUCKETS.map((b) => ({ bucket: b.label, p50: 0, p75: 0, prCount: 0 }));
+
   const db = getDb();
 
   const rows = await db
@@ -112,6 +124,7 @@ export async function getMergeTimeBySize(startDate: number, endDate: number) {
     .from(pullRequests)
     .where(
       and(
+        inArray(pullRequests.repoId, repoIds),
         eq(pullRequests.state, "MERGED"),
         isNotNull(pullRequests.publishedAt),
         isNotNull(pullRequests.mergedAt),
