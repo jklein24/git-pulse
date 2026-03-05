@@ -8,6 +8,10 @@ function log(...args: unknown[]) {
   console.log(`[claude-sync ${ts}]`, ...args);
 }
 
+function normalizeDate(date: string): string {
+  return date.slice(0, 10);
+}
+
 function buildEmailToUserMap(allUsers: { id: number; email: string | null }[]): Map<string, number> {
   const map = new Map<string, number>();
   for (const u of allUsers) {
@@ -21,33 +25,41 @@ function buildEmailToUserMap(allUsers: { id: number; email: string | null }[]): 
 async function upsertUsageRecord(
   record: ClaudeCodeUsageRecord,
   emailToUser: Map<string, number>,
-): Promise<void> {
+): Promise<boolean> {
   const db = getDb();
-  const email = record.actor.email_address.toLowerCase();
+  const rawEmail = record.actor?.email_address;
+  if (!rawEmail) {
+    log("Skipping record with no email:", JSON.stringify(record.actor), "date:", record.date);
+    return false;
+  }
+  const email = rawEmail.toLowerCase();
   const userId = emailToUser.get(email) ?? null;
+  const date = normalizeDate(record.date);
 
+  const core = record.core_metrics;
+  const tools = record.tool_actions;
   const models = record.model_breakdown ?? [];
-  const totalCostCents = models.reduce((sum, m) => sum + (m.estimated_cost_cents ?? 0), 0);
-  const totalInput = models.reduce((sum, m) => sum + (m.input_tokens ?? 0), 0);
-  const totalOutput = models.reduce((sum, m) => sum + (m.output_tokens ?? 0), 0);
+  const totalCostCents = models.reduce((sum, m) => sum + (m.estimated_cost?.amount ?? 0), 0);
+  const totalInput = models.reduce((sum, m) => sum + (m.tokens?.input ?? 0), 0);
+  const totalOutput = models.reduce((sum, m) => sum + (m.tokens?.output ?? 0), 0);
 
   const values = {
     userId,
     email,
-    date: record.date,
-    numSessions: record.num_sessions ?? 0,
-    linesAdded: record.lines_of_code?.added ?? 0,
-    linesRemoved: record.lines_of_code?.removed ?? 0,
-    commitsByClaudeCode: record.commits_by_claude_code ?? 0,
-    prsByClaudeCode: record.pull_requests_by_claude_code ?? 0,
-    editToolAccepted: record.edit_tool?.accepted ?? 0,
-    editToolRejected: record.edit_tool?.rejected ?? 0,
-    writeToolAccepted: record.write_tool?.accepted ?? 0,
-    writeToolRejected: record.write_tool?.rejected ?? 0,
-    multiEditToolAccepted: record.multi_edit_tool?.accepted ?? 0,
-    multiEditToolRejected: record.multi_edit_tool?.rejected ?? 0,
-    notebookEditToolAccepted: record.notebook_edit_tool?.accepted ?? 0,
-    notebookEditToolRejected: record.notebook_edit_tool?.rejected ?? 0,
+    date,
+    numSessions: core?.num_sessions ?? 0,
+    linesAdded: core?.lines_of_code?.added ?? 0,
+    linesRemoved: core?.lines_of_code?.removed ?? 0,
+    commitsByClaudeCode: core?.commits_by_claude_code ?? 0,
+    prsByClaudeCode: core?.pull_requests_by_claude_code ?? 0,
+    editToolAccepted: tools?.edit_tool?.accepted ?? 0,
+    editToolRejected: tools?.edit_tool?.rejected ?? 0,
+    writeToolAccepted: tools?.write_tool?.accepted ?? 0,
+    writeToolRejected: tools?.write_tool?.rejected ?? 0,
+    multiEditToolAccepted: tools?.multi_edit_tool?.accepted ?? 0,
+    multiEditToolRejected: tools?.multi_edit_tool?.rejected ?? 0,
+    notebookEditToolAccepted: tools?.notebook_edit_tool?.accepted ?? 0,
+    notebookEditToolRejected: tools?.notebook_edit_tool?.rejected ?? 0,
     totalInputTokens: totalInput,
     totalOutputTokens: totalOutput,
     estimatedCostCents: Math.round(totalCostCents),
@@ -57,7 +69,7 @@ async function upsertUsageRecord(
   const existing = await db
     .select({ id: claudeCodeUsage.id })
     .from(claudeCodeUsage)
-    .where(and(eq(claudeCodeUsage.email, email), eq(claudeCodeUsage.date, record.date)))
+    .where(and(eq(claudeCodeUsage.email, email), eq(claudeCodeUsage.date, date)))
     .get();
 
   let usageId: number;
@@ -75,14 +87,15 @@ async function upsertUsageRecord(
       models.map((m) => ({
         usageId,
         model: m.model,
-        inputTokens: m.input_tokens ?? 0,
-        outputTokens: m.output_tokens ?? 0,
-        cacheReadTokens: m.cache_read_tokens ?? 0,
-        cacheCreationTokens: m.cache_creation_tokens ?? 0,
-        estimatedCostCents: Math.round(m.estimated_cost_cents ?? 0),
+        inputTokens: m.tokens?.input ?? 0,
+        outputTokens: m.tokens?.output ?? 0,
+        cacheReadTokens: m.tokens?.cache_read ?? 0,
+        cacheCreationTokens: m.tokens?.cache_creation ?? 0,
+        estimatedCostCents: Math.round(m.estimated_cost?.amount ?? 0),
       })),
     );
   }
+  return true;
 }
 
 export async function syncClaudeCodeData(): Promise<{ recordsProcessed: number; unmappedEmails: string[] }> {
@@ -111,20 +124,22 @@ export async function syncClaudeCodeData(): Promise<{ recordsProcessed: number; 
   let processed = 0;
 
   for (const record of records) {
-    await upsertUsageRecord(record, emailToUser);
+    const saved = await upsertUsageRecord(record, emailToUser);
+    if (!saved) continue;
     processed++;
 
-    const email = record.actor.email_address.toLowerCase();
-    if (!emailToUser.has(email)) {
+    const email = record.actor?.email_address?.toLowerCase();
+    if (email && !emailToUser.has(email)) {
       unmappedEmails.add(email);
     }
   }
 
-  const now = new Date().toISOString().slice(0, 10);
+  const yesterday = new Date(Date.now() - 86400000);
+  const lastSyncValue = yesterday.toISOString().slice(0, 10);
   await db
     .insert(settings)
-    .values({ key: "claude_last_synced", value: now })
-    .onConflictDoUpdate({ target: settings.key, set: { value: now } });
+    .values({ key: "claude_last_synced", value: lastSyncValue })
+    .onConflictDoUpdate({ target: settings.key, set: { value: lastSyncValue } });
 
   log(`Sync complete: ${processed} records processed, ${unmappedEmails.size} unmapped emails`);
 

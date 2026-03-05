@@ -1,35 +1,42 @@
 export interface ClaudeCodeUsageRecord {
   actor: {
-    type: string;
-    email_address: string;
+    type?: string;
+    email_address?: string;
+    [key: string]: unknown;
   };
-  date: string; // YYYY-MM-DD
-  num_sessions?: number;
-  lines_of_code?: {
-    added: number;
-    removed: number;
+  date: string;
+  terminal_type?: string;
+  core_metrics?: {
+    num_sessions?: number;
+    lines_of_code?: { added: number; removed: number };
+    commits_by_claude_code?: number;
+    pull_requests_by_claude_code?: number;
   };
-  commits_by_claude_code?: number;
-  pull_requests_by_claude_code?: number;
-  edit_tool?: { accepted: number; rejected: number };
-  write_tool?: { accepted: number; rejected: number };
-  multi_edit_tool?: { accepted: number; rejected: number };
-  notebook_edit_tool?: { accepted: number; rejected: number };
+  tool_actions?: {
+    edit_tool?: { accepted: number; rejected: number };
+    write_tool?: { accepted: number; rejected: number };
+    multi_edit_tool?: { accepted: number; rejected: number };
+    notebook_edit_tool?: { accepted: number; rejected: number };
+  };
   model_breakdown?: Array<{
     model: string;
-    input_tokens?: number;
-    output_tokens?: number;
-    cache_read_tokens?: number;
-    cache_creation_tokens?: number;
-    estimated_cost_cents?: number;
+    tokens?: {
+      input?: number;
+      output?: number;
+      cache_read?: number;
+      cache_creation?: number;
+    };
+    estimated_cost?: {
+      currency?: string;
+      amount?: number;
+    };
   }>;
-  terminal_type?: string;
 }
 
 interface UsageResponse {
   data: ClaudeCodeUsageRecord[];
   has_more: boolean;
-  next_cursor?: string;
+  next_page?: string;
 }
 
 const RETRYABLE_STATUSES = new Set([429, 502, 503, 504]);
@@ -65,7 +72,7 @@ export async function fetchClaudeCodeUsage(
     limit: "1000",
   });
   if (cursor) {
-    params.set("cursor", cursor);
+    params.set("page", cursor);
   }
 
   const url = `https://api.anthropic.com/v1/organizations/usage_report/claude_code?${params}`;
@@ -88,22 +95,42 @@ export async function fetchClaudeCodeUsage(
   });
 }
 
+function generateDayDates(startingAt: string): string[] {
+  const dates: string[] = [];
+  const current = new Date(startingAt + "T00:00:00Z");
+  const now = new Date();
+
+  while (current <= now) {
+    dates.push(current.toISOString().slice(0, 10));
+    current.setUTCDate(current.getUTCDate() + 1);
+  }
+
+  return dates;
+}
+
 export async function fetchAllClaudeCodeUsage(
   adminApiKey: string,
   startingAt: string,
 ): Promise<ClaudeCodeUsageRecord[]> {
   const all: ClaudeCodeUsageRecord[] = [];
-  let cursor: string | undefined;
-  let page = 0;
+  const days = generateDayDates(startingAt);
 
-  while (true) {
-    page++;
-    const response = await fetchClaudeCodeUsage(adminApiKey, startingAt, cursor);
-    all.push(...response.data);
-    console.log(`[claude-sync] Page ${page}: ${response.data.length} records (total: ${all.length})`);
+  console.log(`[claude-sync] Fetching ${days.length} days from ${days[0]} to ${days[days.length - 1]}`);
 
-    if (!response.has_more || !response.next_cursor) break;
-    cursor = response.next_cursor;
+  for (const day of days) {
+    let cursor: string | undefined;
+
+    while (true) {
+      const response = await fetchClaudeCodeUsage(adminApiKey, day, cursor);
+      all.push(...response.data);
+
+      if (response.data.length > 0) {
+        console.log(`[claude-sync] ${day}: ${response.data.length} records (total: ${all.length})`);
+      }
+
+      if (!response.has_more || !response.next_page) break;
+      cursor = response.next_page;
+    }
   }
 
   return all;
