@@ -13,6 +13,8 @@ import AvgPrSizeChart from "@/components/charts/AvgPrSizeChart";
 import ReviewIterationsChart from "@/components/charts/ReviewIterationsChart";
 import MergeTimeBySizeChart from "@/components/charts/MergeTimeBySizeChart";
 import AiUsageTrendChart from "@/components/charts/AiUsageTrendChart";
+import ProductivityConcentrationChart from "@/components/charts/ProductivityConcentrationChart";
+import ContributorMovementChart from "@/components/charts/ContributorMovementChart";
 
 function InfoTooltip({ text }: { text: string }) {
   return (
@@ -37,6 +39,8 @@ export default function TrendsPage() {
   const [churn, setChurn] = useState<Array<{ week: string; rate: number }>>([]);
   const [reviewIterations, setReviewIterations] = useState<Array<{ week: string; medianIterations: number; avgIterations: number; prCount: number }>>([]);
   const [aiTrend, setAiTrend] = useState<Array<{ week: string; sessions: number; linesAdded: number; activeUsers: number }>>([]);
+  const [concentration, setConcentration] = useState<Array<{ month: string; contributors: number; top20PctPrShare: number; top30PctPrShare: number; top50PctPrShare: number; top20PctLineShare: number; top30PctLineShare: number; top50PctLineShare: number }>>([]);
+  const [movement, setMovement] = useState<Array<{ month: string; growing: number; stable: number; declining: number; new: number; inactive: number }>>([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -52,7 +56,8 @@ export default function TrendsPage() {
       fetch(`/api/metrics/churn?${qs}`).then((r) => r.json()),
       fetch(`/api/metrics/review-iterations?${qs}`).then((r) => r.json()),
       fetch(`/api/metrics/ai-usage?${qs}`).then((r) => r.json()).catch(() => ({})),
-    ]).then(([tp, mt, rv, rl, ln, ch, ri, ai]) => {
+      fetch(`/api/metrics/productivity-distribution?${qs}`).then((r) => r.json()).catch(() => ({})),
+    ]).then(([tp, mt, rv, rl, ln, ch, ri, ai, pd]) => {
       setThroughput(tp.teamThroughput || []);
       setMergeTime(mt.mergeTimeTrend || []);
       setMergeTimeBySize(mt.mergeTimeBySize || []);
@@ -69,6 +74,8 @@ export default function TrendsPage() {
           activeUsers: t.activeUsers ?? 0,
         })));
       }
+      setConcentration(pd.concentration || []);
+      setMovement(pd.movement || []);
       setLoading(false);
     });
   }, [startDate, endDate]);
@@ -95,6 +102,26 @@ export default function TrendsPage() {
         <h2 className="text-base font-display font-semibold mb-4 text-text-secondary">Team Throughput</h2>
         <ThroughputChart data={throughput} onWeekClick={handleWeekClick} />
       </section>
+
+      {concentration.length > 1 && (
+        <section>
+          <h2 className="text-base font-display font-semibold mb-4 text-text-secondary">
+            Productivity Concentration
+            <InfoTooltip text="Share of total PRs and lines produced by the top 20% of contributors each month. The dashed line shows what an equal distribution would look like. A rising line means gains are concentrating in fewer people." />
+          </h2>
+          <ProductivityConcentrationChart data={concentration} />
+        </section>
+      )}
+
+      {movement.length > 0 && (
+        <section>
+          <h2 className="text-base font-display font-semibold mb-4 text-text-secondary">
+            Contributor Movement
+            <InfoTooltip text="Month-over-month change in each contributor's PR output. Growing = 25%+ increase (min 2 PRs). Declining = 25%+ decrease (min 2 PRs). New = first month contributing. Inactive = contributed last month but not this month." />
+          </h2>
+          <ContributorMovementChart data={movement} />
+        </section>
+      )}
 
       {aiTrend.length > 0 && (
         <section>
