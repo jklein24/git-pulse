@@ -62,6 +62,16 @@ function SettingsPage() {
   const [claudeLastSynced, setClaudeLastSynced] = useState<string | null>(null);
   const [claudeSyncing, setClaudeSyncing] = useState(false);
   const [claudeSyncResult, setClaudeSyncResult] = useState<{ recordsProcessed?: number; unmappedEmails?: string[]; error?: string } | null>(null);
+
+  const [jiraCloudId, setJiraCloudId] = useState("");
+  const [jiraUserEmail, setJiraUserEmail] = useState("");
+  const [jiraApiToken, setJiraApiToken] = useState("");
+  const [jiraProjects, setJiraProjects] = useState("SP, AT, ENG, PE, SEC, LP");
+  const [jiraSaving, setJiraSaving] = useState(false);
+  const [jiraSaveStatus, setJiraSaveStatus] = useState<{ ok?: boolean; error?: string } | null>(null);
+  const [jiraLastSynced, setJiraLastSynced] = useState<string | null>(null);
+  const [jiraSyncing, setJiraSyncing] = useState(false);
+  const [jiraSyncResult, setJiraSyncResult] = useState<{ issuesProcessed?: number; unmappedAssignees?: string[]; error?: string } | null>(null);
   const [usersList, setUsersList] = useState<Array<{ id: number; githubLogin: string; email: string | null }>>([]);
   const [unmappedEmails, setUnmappedEmails] = useState<string[]>([]);
   const [autoDetecting, setAutoDetecting] = useState(false);
@@ -92,11 +102,16 @@ function SettingsPage() {
         }
         if (data.churn_window_days) setChurnDays(data.churn_window_days);
         if (data.claude_admin_api_key) setClaudeApiKey(data.claude_admin_api_key);
+        if (data.jira_cloud_id) setJiraCloudId(data.jira_cloud_id);
+        if (data.jira_user_email) setJiraUserEmail(data.jira_user_email);
+        if (data.jira_api_token) setJiraApiToken(data.jira_api_token);
+        if (data.jira_projects) setJiraProjects(data.jira_projects);
       });
 
     fetch("/api/repos").then((r) => r.json()).then(setRepos);
     fetch("/api/sync").then((r) => r.json()).then((d) => setSyncJobs(d.jobs || []));
     fetch("/api/sync/claude").then((r) => r.json()).then((d) => setClaudeLastSynced(d.lastSynced));
+    fetch("/api/sync/jira").then((r) => r.json()).then((d) => setJiraLastSynced(d.lastSynced));
     fetch("/api/users").then((r) => r.json()).then((d) => {
       setUsersList(d.users || []);
       setUnmappedEmails(d.unmappedEmails || []);
@@ -202,6 +217,44 @@ function SettingsPage() {
       setClaudeSyncResult({ error: "Sync failed" });
     } finally {
       setClaudeSyncing(false);
+    }
+  };
+
+  const saveJiraSettings = async () => {
+    setJiraSaving(true);
+    setJiraSaveStatus(null);
+    try {
+      await Promise.all([
+        fetch("/api/settings", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ key: "jira_cloud_id", value: jiraCloudId }) }),
+        fetch("/api/settings", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ key: "jira_user_email", value: jiraUserEmail }) }),
+        fetch("/api/settings", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ key: "jira_api_token", value: jiraApiToken }) }),
+        fetch("/api/settings", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ key: "jira_projects", value: jiraProjects }) }),
+      ]);
+      setJiraSaveStatus({ ok: true });
+    } catch {
+      setJiraSaveStatus({ ok: false, error: "Failed to save" });
+    } finally {
+      setJiraSaving(false);
+    }
+  };
+
+  const syncJiraData = async () => {
+    setJiraSyncing(true);
+    setJiraSyncResult(null);
+    try {
+      const res = await fetch("/api/sync/jira", { method: "POST" });
+      const data = await res.json();
+      if (res.ok) {
+        setJiraSyncResult(data);
+        const syncStatus = await fetch("/api/sync/jira").then((r) => r.json());
+        setJiraLastSynced(syncStatus.lastSynced);
+      } else {
+        setJiraSyncResult({ error: data.error });
+      }
+    } catch {
+      setJiraSyncResult({ error: "Sync failed" });
+    } finally {
+      setJiraSyncing(false);
     }
   };
 
@@ -498,6 +551,95 @@ function SettingsPage() {
             {claudeSyncResult.error
               ? `Error: ${claudeSyncResult.error}`
               : `Synced ${claudeSyncResult.recordsProcessed} records${claudeSyncResult.unmappedEmails && claudeSyncResult.unmappedEmails.length > 0 ? ` (${claudeSyncResult.unmappedEmails.length} unmapped emails)` : ""}`}
+          </div>
+        )}
+      </section>
+
+      <section className="bg-bg-secondary rounded-xl border border-border p-6 space-y-4">
+        <h2 className="text-[11px] font-display font-semibold uppercase tracking-widest text-text-muted">
+          Jira Integration
+        </h2>
+        <p className="text-xs text-text-muted">
+          Connect to Jira to sync ticket data (resolved, in-progress, cycle time) alongside PR metrics.
+        </p>
+        <div className="space-y-3">
+          <div className="flex gap-2 items-center">
+            <label className="text-sm text-text-secondary w-28 shrink-0">Cloud ID / URL</label>
+            <input
+              value={jiraCloudId}
+              onChange={(e) => setJiraCloudId(e.target.value)}
+              placeholder="your-domain.atlassian.net"
+              className="flex-1 px-3 py-2 text-sm font-mono bg-bg-tertiary border border-border rounded-lg text-text-primary placeholder:text-text-muted focus:outline-none focus:border-accent/40 focus:shadow-[0_0_0_2px_rgba(34,211,238,0.08)] transition-all"
+            />
+          </div>
+          <div className="flex gap-2 items-center">
+            <label className="text-sm text-text-secondary w-28 shrink-0">User email</label>
+            <input
+              type="email"
+              value={jiraUserEmail}
+              onChange={(e) => setJiraUserEmail(e.target.value)}
+              placeholder="you@company.com"
+              className="flex-1 px-3 py-2 text-sm font-mono bg-bg-tertiary border border-border rounded-lg text-text-primary placeholder:text-text-muted focus:outline-none focus:border-accent/40 focus:shadow-[0_0_0_2px_rgba(34,211,238,0.08)] transition-all"
+            />
+          </div>
+          <div className="flex gap-2 items-center">
+            <label className="text-sm text-text-secondary w-28 shrink-0">API token</label>
+            <input
+              type="password"
+              value={jiraApiToken}
+              onChange={(e) => setJiraApiToken(e.target.value)}
+              placeholder="Jira API token"
+              className="flex-1 px-3 py-2 text-sm font-mono bg-bg-tertiary border border-border rounded-lg text-text-primary placeholder:text-text-muted focus:outline-none focus:border-accent/40 focus:shadow-[0_0_0_2px_rgba(34,211,238,0.08)] transition-all"
+            />
+          </div>
+          <div className="flex gap-2 items-center">
+            <label className="text-sm text-text-secondary w-28 shrink-0">Projects</label>
+            <input
+              value={jiraProjects}
+              onChange={(e) => setJiraProjects(e.target.value)}
+              placeholder="SP, AT, ENG"
+              className="flex-1 px-3 py-2 text-sm font-mono bg-bg-tertiary border border-border rounded-lg text-text-primary placeholder:text-text-muted focus:outline-none focus:border-accent/40 focus:shadow-[0_0_0_2px_rgba(34,211,238,0.08)] transition-all"
+            />
+          </div>
+        </div>
+        <div className="flex items-center gap-3">
+          <button
+            onClick={saveJiraSettings}
+            disabled={jiraSaving || !jiraCloudId || !jiraApiToken || !jiraUserEmail}
+            className="px-4 py-2 text-sm font-display font-semibold rounded-lg bg-accent/10 text-accent border border-accent/20 hover:bg-accent/15 hover:border-accent/40 disabled:opacity-50 transition-all"
+          >
+            {jiraSaving ? "Saving..." : "Save"}
+          </button>
+          <button
+            onClick={syncJiraData}
+            disabled={jiraSyncing || !jiraCloudId || !jiraApiToken || !jiraUserEmail}
+            className="px-4 py-2 text-sm font-display font-semibold rounded-lg bg-blue-500/10 text-blue-400 border border-blue-500/20 hover:bg-blue-500/15 hover:border-blue-500/40 disabled:opacity-50 transition-all"
+          >
+            {jiraSyncing ? (
+              <span className="inline-flex items-center gap-1.5">
+                <span className="inline-block w-3 h-3 border-2 border-blue-400/30 border-t-blue-400 rounded-full animate-spin" />
+                Syncing…
+              </span>
+            ) : "Sync Jira Data"}
+          </button>
+          {jiraLastSynced && (
+            <span className="text-xs text-text-muted font-mono">
+              Last synced: {jiraLastSynced}
+            </span>
+          )}
+        </div>
+        {jiraSaveStatus && (
+          <div className={`flex items-center gap-2 text-sm ${jiraSaveStatus.ok ? "text-success" : "text-danger"}`}>
+            <div className={`w-1.5 h-1.5 rounded-full ${jiraSaveStatus.ok ? "bg-success" : "bg-danger"}`} />
+            {jiraSaveStatus.ok ? "Settings saved" : `Error: ${jiraSaveStatus.error}`}
+          </div>
+        )}
+        {jiraSyncResult && (
+          <div className={`flex items-center gap-2 text-sm ${jiraSyncResult.error ? "text-danger" : "text-success"}`}>
+            <div className={`w-1.5 h-1.5 rounded-full ${jiraSyncResult.error ? "bg-danger" : "bg-success"}`} />
+            {jiraSyncResult.error
+              ? `Error: ${jiraSyncResult.error}`
+              : `Synced ${jiraSyncResult.issuesProcessed} issues${jiraSyncResult.unmappedAssignees && jiraSyncResult.unmappedAssignees.length > 0 ? ` (${jiraSyncResult.unmappedAssignees.length} unmapped assignees)` : ""}`}
           </div>
         )}
       </section>

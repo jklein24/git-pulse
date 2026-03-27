@@ -69,12 +69,30 @@ The SQLite database has the following tables:
    - value: text (nullable)
    NOTE: The settings table is off-limits. Do not query it.
 
+8. jira_issues
+   - id: integer (primary key, auto-increment)
+   - jira_key: text (unique, e.g. "SP-1234", "AT-567")
+   - project_key: text (e.g. "SP" = Spark, "AT" = Atlas, "ENG" = Engineering, "PE" = Production Engineering, "SEC" = Security)
+   - summary: text (issue title)
+   - issue_type: text (nullable, e.g. "Bug", "To Do", "Epic", "Project")
+   - priority: text (nullable, e.g. "High", "Medium", "Low")
+   - status: text (e.g. "To Do", "In Progress", "Done")
+   - assignee_email: text (nullable)
+   - assignee_name: text (nullable)
+   - user_id: integer (foreign key -> users.id, nullable — matched via email)
+   - created_at: integer (unix timestamp)
+   - updated_at: integer (unix timestamp, nullable)
+   - resolved_at: integer (unix timestamp, nullable)
+   - url: text (Jira browse URL, nullable)
+
 Common JOIN patterns:
 - pull_requests JOIN users ON pull_requests.author_id = users.id
 - pull_requests JOIN repos ON pull_requests.repo_id = repos.id
 - pr_reviews JOIN users ON pr_reviews.reviewer_id = users.id
 - pr_files JOIN pull_requests ON pr_files.pr_id = pull_requests.id
+- jira_issues JOIN users ON jira_issues.user_id = users.id
 
 All timestamps are unix epoch seconds (not milliseconds).
 When computing PR size, prefer filtered_additions and filtered_deletions over raw additions/deletions.
+When analyzing engineer productivity, combine PR data with Jira ticket data for a complete picture.
 `.trim();
