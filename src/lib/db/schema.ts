@@ -121,6 +121,30 @@ export const claudeCodeUsage = sqliteTable("claude_code_usage", {
   index("claude_usage_date_idx").on(table.date),
 ]);
 
+export const jiraIssues = sqliteTable("jira_issues", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  jiraKey: text("jira_key").notNull(), // e.g. SP-1234
+  projectKey: text("project_key").notNull(), // e.g. SP, AT, ENG
+  summary: text("summary").notNull(),
+  issueType: text("issue_type"), // Bug, To Do, Epic, Project, etc.
+  priority: text("priority"), // High, Medium, Low, etc.
+  status: text("status").notNull(), // To Do, In Progress, Done
+  assigneeEmail: text("assignee_email"),
+  assigneeName: text("assignee_name"),
+  userId: integer("user_id").references(() => users.id),
+  createdAt: integer("created_at").notNull(),
+  updatedAt: integer("updated_at"),
+  resolvedAt: integer("resolved_at"),
+  url: text("url"),
+}, (table) => [
+  uniqueIndex("jira_key_idx").on(table.jiraKey),
+  index("jira_project_key_idx").on(table.projectKey),
+  index("jira_user_id_idx").on(table.userId),
+  index("jira_status_idx").on(table.status),
+  index("jira_resolved_at_idx").on(table.resolvedAt),
+  index("jira_created_at_idx").on(table.createdAt),
+]);
+
 export const claudeCodeModelUsage = sqliteTable("claude_code_model_usage", {
   id: integer("id").primaryKey({ autoIncrement: true }),
   usageId: integer("usage_id").notNull().references(() => claudeCodeUsage.id),
