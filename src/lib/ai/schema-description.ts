@@ -15,6 +15,9 @@ The SQLite database has the following tables:
    - github_login: text (unique, e.g. "octocat")
    - github_id: integer (nullable)
    - avatar_url: text (nullable)
+   - pod: text (nullable, e.g. "Protocol", "Bitcoin", "PayX", "Fiat", "Spark Infrastructure", "Payments", "World Domination")
+   - team_group: text (nullable, e.g. "Spark", "Atlas", "Cross-cutting")
+   - role: text (nullable, e.g. "IC", "Pod Lead", "EM", "Security Lead", "Prod Eng")
    - first_seen_at: integer (unix timestamp)
 
 3. pull_requests

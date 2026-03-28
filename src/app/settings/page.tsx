@@ -62,7 +62,7 @@ function SettingsPage() {
   const [claudeLastSynced, setClaudeLastSynced] = useState<string | null>(null);
   const [claudeSyncing, setClaudeSyncing] = useState(false);
   const [claudeSyncResult, setClaudeSyncResult] = useState<{ recordsProcessed?: number; unmappedEmails?: string[]; error?: string } | null>(null);
-  const [usersList, setUsersList] = useState<Array<{ id: number; githubLogin: string; email: string | null }>>([]);
+  const [usersList, setUsersList] = useState<Array<{ id: number; githubLogin: string; email: string | null; pod: string | null; teamGroup: string | null; role: string | null }>>([]);
   const [unmappedEmails, setUnmappedEmails] = useState<string[]>([]);
   const [autoDetecting, setAutoDetecting] = useState(false);
 
@@ -555,6 +555,102 @@ function SettingsPage() {
                       }}
                       className="w-full px-2 py-1 text-sm font-mono bg-bg-tertiary border border-border rounded text-text-primary placeholder:text-text-muted focus:outline-none focus:border-accent/40 transition-all"
                     />
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+      </section>
+
+      <section className="bg-bg-secondary rounded-xl border border-border p-6 space-y-4">
+        <h2 className="text-[11px] font-display font-semibold uppercase tracking-widest text-text-muted">
+          Team Structure
+        </h2>
+        <p className="text-xs text-text-muted">
+          Assign engineers to pods and roles. This enables pod-level health metrics and role-aware analysis.
+        </p>
+        {usersList.length > 0 && (
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="text-left text-[11px] font-display font-semibold text-text-muted uppercase tracking-widest border-b border-border">
+                <th className="pb-3">Engineer</th>
+                <th className="pb-3">Pod</th>
+                <th className="pb-3">Group</th>
+                <th className="pb-3">Role</th>
+              </tr>
+            </thead>
+            <tbody>
+              {usersList.map((user) => (
+                <tr key={`team-${user.id}`} className="border-b border-border/40">
+                  <td className="py-3 font-mono font-medium text-text-primary">{user.githubLogin}</td>
+                  <td className="py-3">
+                    <select
+                      defaultValue={user.pod || ""}
+                      onChange={async (e) => {
+                        const val = e.target.value;
+                        await fetch("/api/users", {
+                          method: "PUT",
+                          headers: { "Content-Type": "application/json" },
+                          body: JSON.stringify({ userId: user.id, pod: val }),
+                        });
+                        setUsersList((prev) => prev.map((u) => u.id === user.id ? { ...u, pod: val || null } : u));
+                      }}
+                      className="px-2 py-1 text-sm font-mono bg-bg-tertiary border border-border rounded text-text-primary focus:outline-none focus:border-accent/40 transition-all"
+                    >
+                      <option value="">—</option>
+                      <option value="Protocol">Protocol</option>
+                      <option value="Spark Infrastructure">Spark Infrastructure</option>
+                      <option value="Bitcoin">Bitcoin</option>
+                      <option value="Payments">Payments</option>
+                      <option value="PayX">PayX</option>
+                      <option value="Fiat">Fiat</option>
+                      <option value="World Domination">World Domination</option>
+                      <option value="Production Engineering">Production Engineering</option>
+                      <option value="Security">Security</option>
+                    </select>
+                  </td>
+                  <td className="py-3">
+                    <select
+                      defaultValue={user.teamGroup || ""}
+                      onChange={async (e) => {
+                        const val = e.target.value;
+                        await fetch("/api/users", {
+                          method: "PUT",
+                          headers: { "Content-Type": "application/json" },
+                          body: JSON.stringify({ userId: user.id, teamGroup: val }),
+                        });
+                        setUsersList((prev) => prev.map((u) => u.id === user.id ? { ...u, teamGroup: val || null } : u));
+                      }}
+                      className="px-2 py-1 text-sm font-mono bg-bg-tertiary border border-border rounded text-text-primary focus:outline-none focus:border-accent/40 transition-all"
+                    >
+                      <option value="">—</option>
+                      <option value="Spark">Spark</option>
+                      <option value="Atlas">Atlas</option>
+                      <option value="Cross-cutting">Cross-cutting</option>
+                    </select>
+                  </td>
+                  <td className="py-3">
+                    <select
+                      defaultValue={user.role || ""}
+                      onChange={async (e) => {
+                        const val = e.target.value;
+                        await fetch("/api/users", {
+                          method: "PUT",
+                          headers: { "Content-Type": "application/json" },
+                          body: JSON.stringify({ userId: user.id, role: val }),
+                        });
+                        setUsersList((prev) => prev.map((u) => u.id === user.id ? { ...u, role: val || null } : u));
+                      }}
+                      className="px-2 py-1 text-sm font-mono bg-bg-tertiary border border-border rounded text-text-primary focus:outline-none focus:border-accent/40 transition-all"
+                    >
+                      <option value="">—</option>
+                      <option value="IC">IC</option>
+                      <option value="Pod Lead">Pod Lead</option>
+                      <option value="EM">EM</option>
+                      <option value="Security Lead">Security Lead</option>
+                      <option value="Prod Eng">Prod Eng</option>
+                    </select>
                   </td>
                 </tr>
               ))}
