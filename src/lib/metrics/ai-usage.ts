@@ -191,15 +191,34 @@ export async function getAiSummaryCards(startDate: number, endDate: number) {
     )
     .get();
 
+  // Count contributors who also used Claude (intersection, not union)
+  const contributorsUsingAi = await db
+    .select({
+      count: sql<number>`count(distinct ${pullRequests.authorId})`.as("count"),
+    })
+    .from(pullRequests)
+    .innerJoin(users, eq(pullRequests.authorId, users.id))
+    .innerJoin(claudeCodeUsage, eq(claudeCodeUsage.userId, users.id))
+    .where(
+      and(
+        eq(pullRequests.state, "MERGED"),
+        gte(pullRequests.mergedAt, startDate),
+        lte(pullRequests.mergedAt, endDate),
+        gte(claudeCodeUsage.date, startStr),
+        lte(claudeCodeUsage.date, endStr),
+      ),
+    )
+    .get();
+
   const activeContributors = totalContributors?.count ?? 0;
-  const activeAiUsers = aiStats?.activeAiUsers ?? 0;
+  const activeAiContributors = contributorsUsingAi?.count ?? 0;
   const totalCostCents = aiStats?.totalCostCents ?? 0;
   const mergedPrs = totalMergedPrs?.count ?? 1;
   const accepted = aiStats?.accepted ?? 0;
   const rejected = aiStats?.rejected ?? 0;
 
   return {
-    adoptionRate: activeContributors > 0 ? Math.round((activeAiUsers / activeContributors) * 100) : 0,
+    adoptionRate: activeContributors > 0 ? Math.round((activeAiContributors / activeContributors) * 100) : 0,
     aiAssistedPrs: aiStats?.aiPrs ?? 0,
     costPerMergedPr: mergedPrs > 0 ? Math.round(totalCostCents / mergedPrs) / 100 : 0,
     toolAcceptRate: accepted + rejected > 0 ? Math.round((accepted / (accepted + rejected)) * 1000) / 10 : 0,
