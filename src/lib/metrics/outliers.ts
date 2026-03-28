@@ -1,6 +1,6 @@
 import { sql, and, gte, lte, eq, isNotNull } from "drizzle-orm";
 import { getDb } from "../db";
-import { pullRequests, prReviews, users, claudeCodeUsage } from "../db/schema";
+import { pullRequests, prReviews, users, claudeCodeUsage, jiraIssues } from "../db/schema";
 import { stddev, mean, rollingAverage, formatDate, MONDAY_OFFSET } from "./utils";
 
 const EXCLUDED_LOGINS = new Set([
@@ -244,6 +244,68 @@ export async function getOutliers(startDate: number, endDate: number): Promise<O
     }
   } catch {
     // AI data may not exist yet
+  }
+
+  // Activity gap detection: active in GitHub but zero Jira, or vice versa
+  try {
+    const jiraByUser = await db
+      .select({
+        login: users.githubLogin,
+        avatarUrl: users.avatarUrl,
+        resolved: sql<number>`count(*)`.as("resolved"),
+      })
+      .from(jiraIssues)
+      .innerJoin(users, eq(jiraIssues.userId, users.id))
+      .where(
+        and(
+          eq(jiraIssues.status, "Done"),
+          isNotNull(jiraIssues.resolvedAt),
+          gte(jiraIssues.resolvedAt, startDate),
+          lte(jiraIssues.resolvedAt, endDate),
+        ),
+      )
+      .groupBy(users.githubLogin);
+
+    const jiraLogins = new Set(jiraByUser.map((r) => r.login));
+    const prLogins = new Set(prsMerged.filter((r) => !EXCLUDED_LOGINS.has(r.login)).map((r) => r.login));
+
+    // Skip activity gap detection if Jira has no data at all (sync not configured)
+    const hasJiraData = jiraByUser.length > 0;
+
+    // Active in GitHub but zero Jira tickets
+    for (const login of prLogins) {
+      if (!hasJiraData) break;
+      if (!jiraLogins.has(login)) {
+        const user = prsMerged.find((r) => r.login === login);
+        outliers.push({
+          login,
+          avatarUrl: user?.avatarUrl ?? null,
+          metric: "Activity Gap (GitHub only, no Jira)",
+          value: 0,
+          teamMean: 0,
+          type: "bottom",
+          severity: "info",
+        });
+      }
+    }
+
+    // Active in Jira but zero PRs in GitHub
+    for (const r of jiraByUser) {
+      if (EXCLUDED_LOGINS.has(r.login)) continue;
+      if (!prLogins.has(r.login)) {
+        outliers.push({
+          login: r.login,
+          avatarUrl: r.avatarUrl,
+          metric: "Activity Gap (Jira only, no PRs)",
+          value: r.resolved,
+          teamMean: 0,
+          type: "bottom",
+          severity: "info",
+        });
+      }
+    }
+  } catch {
+    // Jira table may not exist yet
   }
 
   const seen = new Set<string>();

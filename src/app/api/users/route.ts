@@ -25,18 +25,26 @@ export async function GET() {
 export async function PUT(request: NextRequest) {
   const db = getDb();
   const body = await request.json();
-  const { userId, email } = body;
+  const { userId, email, pod, teamGroup, role } = body;
 
   if (!userId) {
     return NextResponse.json({ error: "userId is required" }, { status: 400 });
   }
 
+  const updates: Record<string, string | null> = {};
+  if (email !== undefined) updates.email = email || null;
+  if (pod !== undefined) updates.pod = pod || null;
+  if (teamGroup !== undefined) updates.teamGroup = teamGroup || null;
+  if (role !== undefined) updates.role = role || null;
+
   await db
     .update(users)
-    .set({ email: email || null })
+    .set(updates)
     .where(eq(users.id, userId));
 
-  await remapClaudeUsageUsers();
+  if (email !== undefined) {
+    await remapClaudeUsageUsers();
+  }
 
   return NextResponse.json({ saved: true });
 }

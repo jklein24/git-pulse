@@ -186,6 +186,16 @@ export default function DashboardPage() {
               Generating summary...
             </div>
           </div>
+        ) : summaryError === "NO_API_KEY" ? (
+          <div className="bg-bg-secondary rounded-xl border border-border p-5">
+            <p className="text-sm text-text-muted mb-2">AI-powered weekly summaries require an Anthropic API key.</p>
+            <a
+              href="/settings"
+              className="text-xs text-accent hover:text-accent-hover transition-colors"
+            >
+              Add API key in Settings
+            </a>
+          </div>
         ) : summaryError ? (
           <div className="bg-bg-secondary rounded-xl border border-border p-5">
             <p className="text-sm text-danger/80 mb-3">{summaryError}</p>
