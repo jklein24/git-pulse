@@ -12,7 +12,7 @@ const DateContext = createContext<DateRange | null>(null);
 
 export function DateProvider({ children }: { children: ReactNode }) {
   const now = Math.floor(Date.now() / 1000);
-  const [startDate, setStart] = useState(now - 30 * 86400);
+  const [startDate, setStart] = useState(now - 90 * 86400);
   const [endDate, setEnd] = useState(now);
 
   const setRange = (start: number, end: number) => {

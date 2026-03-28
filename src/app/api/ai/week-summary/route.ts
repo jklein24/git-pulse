@@ -4,7 +4,21 @@ import Anthropic from "@anthropic-ai/sdk";
 import { getDb } from "@/lib/db";
 import { settings } from "@/lib/db/schema";
 
-const client = new Anthropic();
+async function getClient(): Promise<Anthropic> {
+  // Try env var first
+  if (process.env.ANTHROPIC_API_KEY) {
+    return new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
+  }
+
+  // Fall back to API key stored in settings
+  const db = getDb();
+  const row = await db.select().from(settings).where(eq(settings.key, "anthropic_api_key")).get();
+  if (row?.value) {
+    return new Anthropic({ apiKey: row.value });
+  }
+
+  throw new Error("NO_API_KEY");
+}
 
 export async function POST(request: NextRequest) {
   const { weekStart, force } = await request.json();
@@ -36,6 +50,7 @@ export async function POST(request: NextRequest) {
   ).join("\n");
 
   try {
+    const client = await getClient();
     const response = await client.messages.create({
       model: "claude-sonnet-4-6",
       max_tokens: 1024,
