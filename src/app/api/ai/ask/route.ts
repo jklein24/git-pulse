@@ -1,9 +1,22 @@
 import { NextRequest, NextResponse } from "next/server";
+import { eq } from "drizzle-orm";
 import Anthropic from "@anthropic-ai/sdk";
 import { getReadOnlyDb } from "@/lib/ai/read-only-db";
 import { SCHEMA_DESCRIPTION } from "@/lib/ai/schema-description";
+import { getDb } from "@/lib/db";
+import { settings } from "@/lib/db/schema";
 
-const client = new Anthropic();
+async function getClient(): Promise<Anthropic> {
+  if (process.env.ANTHROPIC_API_KEY) {
+    return new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
+  }
+  const db = getDb();
+  const row = await db.select().from(settings).where(eq(settings.key, "anthropic_api_key")).get();
+  if (row?.value) {
+    return new Anthropic({ apiKey: row.value });
+  }
+  throw new Error("NO_API_KEY");
+}
 
 const MAX_QUESTION_LENGTH = 1000;
 const MAX_TURNS = 10;
@@ -62,6 +75,7 @@ export async function POST(request: NextRequest) {
   ];
 
   try {
+    const client = await getClient();
     for (let turn = 0; turn < MAX_TURNS; turn++) {
       const response = await client.messages.create({
         model: "claude-sonnet-4-6",

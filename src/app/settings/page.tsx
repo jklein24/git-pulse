@@ -63,6 +63,10 @@ function SettingsPage() {
   const [claudeSyncing, setClaudeSyncing] = useState(false);
   const [claudeSyncResult, setClaudeSyncResult] = useState<{ recordsProcessed?: number; unmappedEmails?: string[]; error?: string } | null>(null);
 
+  const [anthropicApiKey, setAnthropicApiKey] = useState("");
+  const [anthropicApiKeySaving, setAnthropicApiKeySaving] = useState(false);
+  const [anthropicApiKeyStatus, setAnthropicApiKeyStatus] = useState<{ ok?: boolean; error?: string } | null>(null);
+
   const [jiraCloudId, setJiraCloudId] = useState("");
   const [jiraUserEmail, setJiraUserEmail] = useState("");
   const [jiraApiToken, setJiraApiToken] = useState("");
@@ -102,6 +106,7 @@ function SettingsPage() {
         }
         if (data.churn_window_days) setChurnDays(data.churn_window_days);
         if (data.claude_admin_api_key) setClaudeApiKey(data.claude_admin_api_key);
+        if (data.anthropic_api_key) setAnthropicApiKey(data.anthropic_api_key);
         if (data.jira_cloud_id) setJiraCloudId(data.jira_cloud_id);
         if (data.jira_user_email) setJiraUserEmail(data.jira_user_email);
         if (data.jira_api_token) setJiraApiToken(data.jira_api_token);
@@ -194,6 +199,23 @@ function SettingsPage() {
       setClaudeApiKeyStatus({ ok: false, error: "Failed to save" });
     } finally {
       setClaudeApiKeySaving(false);
+    }
+  };
+
+  const saveAnthropicApiKey = async () => {
+    setAnthropicApiKeySaving(true);
+    setAnthropicApiKeyStatus(null);
+    try {
+      await fetch("/api/settings", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ key: "anthropic_api_key", value: anthropicApiKey }),
+      });
+      setAnthropicApiKeyStatus({ ok: true });
+    } catch {
+      setAnthropicApiKeyStatus({ ok: false, error: "Failed to save" });
+    } finally {
+      setAnthropicApiKeySaving(false);
     }
   };
 
@@ -551,6 +573,37 @@ function SettingsPage() {
             {claudeSyncResult.error
               ? `Error: ${claudeSyncResult.error}`
               : `Synced ${claudeSyncResult.recordsProcessed} records${claudeSyncResult.unmappedEmails && claudeSyncResult.unmappedEmails.length > 0 ? ` (${claudeSyncResult.unmappedEmails.length} unmapped emails)` : ""}`}
+          </div>
+        )}
+      </section>
+
+      <section className="bg-bg-secondary rounded-xl border border-border p-6 space-y-4">
+        <h2 className="text-[11px] font-display font-semibold uppercase tracking-widest text-text-muted">
+          AI Summaries (Anthropic API)
+        </h2>
+        <p className="text-xs text-text-muted">
+          Regular Anthropic API key for AI-powered weekly summaries and the Ask AI feature. Get one from console.anthropic.com → API Keys.
+        </p>
+        <div className="flex gap-2">
+          <input
+            type="password"
+            value={anthropicApiKey}
+            onChange={(e) => setAnthropicApiKey(e.target.value)}
+            placeholder="sk-ant-api..."
+            className="flex-1 px-3 py-2 text-sm font-mono bg-bg-tertiary border border-border rounded-lg text-text-primary placeholder:text-text-muted focus:outline-none focus:border-accent/40 focus:shadow-[0_0_0_2px_rgba(34,211,238,0.08)] transition-all"
+          />
+          <button
+            onClick={saveAnthropicApiKey}
+            disabled={anthropicApiKeySaving}
+            className="px-4 py-2 text-sm font-display font-semibold rounded-lg bg-accent/10 text-accent border border-accent/20 hover:bg-accent/15 hover:border-accent/40 disabled:opacity-50 transition-all"
+          >
+            {anthropicApiKeySaving ? "Saving..." : "Save"}
+          </button>
+        </div>
+        {anthropicApiKeyStatus && (
+          <div className={`flex items-center gap-2 text-sm ${anthropicApiKeyStatus.ok ? "text-success" : "text-danger"}`}>
+            <div className={`w-1.5 h-1.5 rounded-full ${anthropicApiKeyStatus.ok ? "bg-success" : "bg-danger"}`} />
+            {anthropicApiKeyStatus.ok ? "API key saved" : `Error: ${anthropicApiKeyStatus.error}`}
           </div>
         )}
       </section>
