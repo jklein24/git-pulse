@@ -76,7 +76,7 @@ function SettingsPage() {
   const [jiraLastSynced, setJiraLastSynced] = useState<string | null>(null);
   const [jiraSyncing, setJiraSyncing] = useState(false);
   const [jiraSyncResult, setJiraSyncResult] = useState<{ issuesProcessed?: number; unmappedAssignees?: string[]; error?: string } | null>(null);
-  const [usersList, setUsersList] = useState<Array<{ id: number; githubLogin: string; email: string | null }>>([]);
+  const [usersList, setUsersList] = useState<Array<{ id: number; githubLogin: string; email: string | null; pod: string | null; teamGroup: string | null; role: string | null }>>([]);
   const [unmappedEmails, setUnmappedEmails] = useState<string[]>([]);
   const [autoDetecting, setAutoDetecting] = useState(false);
 
@@ -701,6 +701,87 @@ function SettingsPage() {
             {jiraSyncResult.error
               ? `Error: ${jiraSyncResult.error}`
               : `Synced ${jiraSyncResult.issuesProcessed} issues${jiraSyncResult.unmappedAssignees && jiraSyncResult.unmappedAssignees.length > 0 ? ` (${jiraSyncResult.unmappedAssignees.length} unmapped assignees)` : ""}`}
+          </div>
+        )}
+      </section>
+
+      <section className="bg-bg-secondary rounded-xl border border-border p-6 space-y-4">
+        <h2 className="text-[11px] font-display font-semibold uppercase tracking-widest text-text-muted">
+          Team Structure
+        </h2>
+        <p className="text-xs text-text-muted">
+          Assign engineers to pods. This powers the Pods health page and per-pod metrics.
+        </p>
+        {usersList.filter(u => !["claude","cursor","github-actions","lightspark-copybara","lightspark-bot","restamp-bot","coderabbitai","graphite-app","stainless-app","lightning-mpp-sdk-release-bot","greptile-apps"].includes(u.githubLogin)).length > 0 && (
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="text-left text-[11px] font-display font-semibold text-text-muted uppercase tracking-widest border-b border-border">
+                  <th className="pb-3">Person</th>
+                  <th className="pb-3">Pod</th>
+                  <th className="pb-3">Group</th>
+                  <th className="pb-3">Role</th>
+                </tr>
+              </thead>
+              <tbody>
+                {usersList
+                  .filter(u => !["claude","cursor","github-actions","lightspark-copybara","lightspark-bot","restamp-bot","coderabbitai","graphite-app","stainless-app","lightning-mpp-sdk-release-bot","greptile-apps"].includes(u.githubLogin))
+                  .sort((a, b) => (a.pod || "zzz").localeCompare(b.pod || "zzz") || a.githubLogin.localeCompare(b.githubLogin))
+                  .map((user) => (
+                  <tr key={user.id} className="border-b border-border/40">
+                    <td className="py-2 font-mono text-text-primary text-xs">{user.githubLogin}</td>
+                    <td className="py-2">
+                      <select
+                        value={user.pod || ""}
+                        onChange={async (e) => {
+                          const pod = e.target.value;
+                          await fetch("/api/users", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ userId: user.id, pod: pod || null }) });
+                          setUsersList(prev => prev.map(u => u.id === user.id ? { ...u, pod } : u));
+                        }}
+                        className="w-full px-2 py-1 text-xs bg-bg-tertiary border border-border rounded text-text-primary"
+                      >
+                        <option value="">—</option>
+                        {["Protocol","Spark Infrastructure","Bitcoin","Payments","PayX","Fiat","World Domination","Frontend / Cross-cutting","AI Infrastructure","Production Engineering","Security","Design","Leadership","Cross-cutting"].map(p => (
+                          <option key={p} value={p}>{p}</option>
+                        ))}
+                      </select>
+                    </td>
+                    <td className="py-2">
+                      <select
+                        value={user.teamGroup || ""}
+                        onChange={async (e) => {
+                          const teamGroup = e.target.value;
+                          await fetch("/api/users", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ userId: user.id, teamGroup: teamGroup || null }) });
+                          setUsersList(prev => prev.map(u => u.id === user.id ? { ...u, teamGroup } : u));
+                        }}
+                        className="w-full px-2 py-1 text-xs bg-bg-tertiary border border-border rounded text-text-primary"
+                      >
+                        <option value="">—</option>
+                        {["Spark","Atlas","Cross-cutting","Design","Leadership"].map(g => (
+                          <option key={g} value={g}>{g}</option>
+                        ))}
+                      </select>
+                    </td>
+                    <td className="py-2">
+                      <select
+                        value={user.role || ""}
+                        onChange={async (e) => {
+                          const role = e.target.value;
+                          await fetch("/api/users", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ userId: user.id, role: role || null }) });
+                          setUsersList(prev => prev.map(u => u.id === user.id ? { ...u, role } : u));
+                        }}
+                        className="w-full px-2 py-1 text-xs bg-bg-tertiary border border-border rounded text-text-primary"
+                      >
+                        <option value="">—</option>
+                        {["IC","Pod Lead","EM","CTO","Prod Eng","Security Lead","Designer"].map(r => (
+                          <option key={r} value={r}>{r}</option>
+                        ))}
+                      </select>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
           </div>
         )}
       </section>
