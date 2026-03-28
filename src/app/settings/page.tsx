@@ -105,8 +105,8 @@ function SettingsPage() {
           try { setGlobs(JSON.parse(data.exclude_globs)); } catch {}
         }
         if (data.churn_window_days) setChurnDays(data.churn_window_days);
-        if (data.claude_admin_api_key) setClaudeApiKey(data.claude_admin_api_key);
-        if (data.anthropic_api_key) setAnthropicApiKey(data.anthropic_api_key);
+        if (data.claude_admin_api_key && !data.claude_admin_api_key.startsWith("*")) setClaudeApiKey(data.claude_admin_api_key);
+        if (data.anthropic_api_key && !data.anthropic_api_key.startsWith("*")) setAnthropicApiKey(data.anthropic_api_key);
         if (data.jira_cloud_id) setJiraCloudId(data.jira_cloud_id);
         if (data.jira_user_email) setJiraUserEmail(data.jira_user_email);
         if (data.jira_api_token) setJiraApiToken(data.jira_api_token);
@@ -186,6 +186,10 @@ function SettingsPage() {
   };
 
   const saveClaudeApiKey = async () => {
+    if (!claudeApiKey || claudeApiKey.startsWith("*")) {
+      setClaudeApiKeyStatus({ ok: false, error: "Enter a valid API key" });
+      return;
+    }
     setClaudeApiKeySaving(true);
     setClaudeApiKeyStatus(null);
     try {
@@ -203,6 +207,10 @@ function SettingsPage() {
   };
 
   const saveAnthropicApiKey = async () => {
+    if (!anthropicApiKey || anthropicApiKey.startsWith("*")) {
+      setAnthropicApiKeyStatus({ ok: false, error: "Enter a valid API key" });
+      return;
+    }
     setAnthropicApiKeySaving(true);
     setAnthropicApiKeyStatus(null);
     try {
