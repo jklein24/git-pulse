@@ -47,6 +47,7 @@ interface WeeklyActivity {
   week: string;
   prs: number;
   reviews: number;
+  tickets: number;
   linesChanged: number;
 }
 
@@ -77,6 +78,21 @@ interface AiSummary {
   costCents: number;
 }
 
+interface WeeklyTickets {
+  week: string;
+  resolved: number;
+}
+
+interface RecentTicket {
+  jiraKey: string;
+  summary: string;
+  status: string;
+  issueType: string | null;
+  resolvedAt: number | null;
+  createdAt: number;
+  url: string | null;
+}
+
 interface PersonData {
   user: { login: string; avatarUrl: string | null };
   weeklyPrs: WeeklyPrCount[];
@@ -84,19 +100,29 @@ interface PersonData {
   recentPrs: RecentPr[];
   aiWeekly?: AiWeekly[];
   aiSummary?: AiSummary;
+  weeklyTickets?: WeeklyTickets[];
+  recentTickets?: RecentTicket[];
 }
 
-function mergeWeeklyData(prs: WeeklyPrCount[], reviews: WeeklyCount[]): WeeklyActivity[] {
+function mergeWeeklyData(prs: WeeklyPrCount[], reviews: WeeklyCount[], tickets?: WeeklyTickets[]): WeeklyActivity[] {
   const map = new Map<string, WeeklyActivity>();
   for (const r of prs) {
-    map.set(r.week, { week: r.week, prs: r.count, reviews: 0, linesChanged: r.linesChanged });
+    map.set(r.week, { week: r.week, prs: r.count, reviews: 0, tickets: 0, linesChanged: r.linesChanged });
   }
   for (const r of reviews) {
     const existing = map.get(r.week);
     if (existing) {
       existing.reviews = r.count;
     } else {
-      map.set(r.week, { week: r.week, prs: 0, reviews: r.count, linesChanged: 0 });
+      map.set(r.week, { week: r.week, prs: 0, reviews: r.count, tickets: 0, linesChanged: 0 });
+    }
+  }
+  for (const r of (tickets ?? [])) {
+    const existing = map.get(r.week);
+    if (existing) {
+      existing.tickets = r.resolved;
+    } else {
+      map.set(r.week, { week: r.week, prs: 0, reviews: 0, tickets: r.resolved, linesChanged: 0 });
     }
   }
   return Array.from(map.values()).sort((a, b) => a.week.localeCompare(b.week));
@@ -157,11 +183,11 @@ export default function PersonDetailPage() {
       <div className="space-y-2">
         <h2 className="text-sm font-display font-semibold text-text-muted uppercase tracking-widest">Activity per Week</h2>
         <div className="rounded-xl border border-border bg-bg-secondary p-5">
-          {data.weeklyPrs.length === 0 && data.weeklyReviews.length === 0 ? (
+          {data.weeklyPrs.length === 0 && data.weeklyReviews.length === 0 && (!data.weeklyTickets || data.weeklyTickets.length === 0) ? (
             <div className="text-text-muted text-sm">No activity in this period.</div>
           ) : (
             <ResponsiveContainer width="100%" height={260}>
-              <ComposedChart data={mergeWeeklyData(data.weeklyPrs, data.weeklyReviews)}>
+              <ComposedChart data={mergeWeeklyData(data.weeklyPrs, data.weeklyReviews, data.weeklyTickets)}>
                 <CartesianGrid stroke={CHART_COLORS.grid} strokeDasharray="3 3" vertical={false} />
                 <XAxis
                   dataKey="week"
@@ -198,6 +224,7 @@ export default function PersonDetailPage() {
                 <Legend wrapperStyle={{ fontSize: 11, fontFamily: "var(--font-dm-mono)", color: CHART_COLORS.axis }} />
                 <Bar yAxisId="left" dataKey="prs" name="PRs Merged" fill={CHART_COLORS.bar} radius={[4, 4, 0, 0]} fillOpacity={0.85} />
                 <Bar yAxisId="left" dataKey="reviews" name="Reviews" fill={CHART_COLORS.reviewBar} radius={[4, 4, 0, 0]} fillOpacity={0.85} />
+                <Bar yAxisId="left" dataKey="tickets" name="Tickets Resolved" fill="#3B82F6" radius={[4, 4, 0, 0]} fillOpacity={0.85} />
                 <Line yAxisId="right" type="monotone" dataKey="linesChanged" name="Lines Changed" stroke={CHART_COLORS.lines} strokeWidth={2} dot={{ r: 3, fill: CHART_COLORS.lines }} />
               </ComposedChart>
             </ResponsiveContainer>
@@ -297,6 +324,55 @@ export default function PersonDetailPage() {
           </div>
         )}
       </div>
+
+      {data.recentTickets && data.recentTickets.length > 0 && (
+        <div className="space-y-2">
+          <h2 className="text-sm font-display font-semibold text-text-muted uppercase tracking-widest">Jira Tickets</h2>
+          <div className="bg-bg-secondary rounded-xl border border-border overflow-hidden">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="text-left text-[11px] font-display font-semibold text-text-muted uppercase tracking-widest border-b border-border">
+                  <th className="px-4 py-3">Ticket</th>
+                  <th className="px-4 py-3">Type</th>
+                  <th className="px-4 py-3 text-center">Status</th>
+                  <th className="px-4 py-3 text-right">Date</th>
+                </tr>
+              </thead>
+              <tbody>
+                {data.recentTickets.map((ticket) => (
+                  <tr key={ticket.jiraKey} className="border-b border-border/40 hover:bg-bg-tertiary/50 transition-colors">
+                    <td className="px-4 py-3">
+                      <div className="flex items-center gap-2">
+                        {ticket.url ? (
+                          <a href={ticket.url} target="_blank" rel="noopener noreferrer" className="text-blue-400 hover:text-blue-300 font-mono font-medium transition-colors">
+                            {ticket.jiraKey}
+                          </a>
+                        ) : (
+                          <span className="font-mono font-medium text-blue-400">{ticket.jiraKey}</span>
+                        )}
+                        <span className="text-text-primary truncate max-w-md">{ticket.summary}</span>
+                      </div>
+                    </td>
+                    <td className="px-4 py-3 text-text-muted font-mono text-xs">{ticket.issueType ?? "—"}</td>
+                    <td className="px-4 py-3 text-center">
+                      <span className={`inline-block px-2 py-0.5 rounded-md text-xs font-mono font-medium ${
+                        ticket.status === "Done" ? "bg-success/10 text-success border border-success/20" :
+                        ticket.status === "In Progress" ? "bg-accent/10 text-accent border border-accent/20" :
+                        "bg-bg-tertiary text-text-muted border border-border"
+                      }`}>
+                        {ticket.status.toLowerCase()}
+                      </span>
+                    </td>
+                    <td className="px-4 py-3 text-right font-mono text-xs text-text-secondary">
+                      {ticket.resolvedAt ? formatTimestamp(ticket.resolvedAt) : formatTimestamp(ticket.createdAt)}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
