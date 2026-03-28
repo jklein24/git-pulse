@@ -57,21 +57,23 @@ export async function searchJiraIssues(
   jql: string,
   fields: string[] = ["summary", "status", "issuetype", "priority", "assignee", "created", "updated", "resolutiondate", "project"],
   maxResults: number = 100,
-  startAt: number = 0,
-): Promise<JiraSearchResponse> {
+  cursor?: string,
+): Promise<JiraSearchResponse & { nextPageToken?: string }> {
   // Use site-scoped URL with Basic auth (email:api-token)
   // cloudId can be "foo.atlassian.net" or just "foo" — normalize to site URL
-  // Uses GET /rest/api/3/search/jql (POST /rest/api/3/search returns 410 Gone)
+  // Uses GET /rest/api/3/search/jql with cursor-based pagination (nextPageToken)
   const site = cloudId.includes(".") ? cloudId : `${cloudId}.atlassian.net`;
   const params = new URLSearchParams({
     jql,
     fields: fields.join(","),
     maxResults: String(maxResults),
-    startAt: String(startAt),
   });
+  if (cursor) {
+    params.set("nextPageToken", cursor);
+  }
   const url = `https://${site}/rest/api/3/search/jql?${params}`;
 
-  return withRetry(`jira search startAt=${startAt}`, async () => {
+  return withRetry(`jira search${cursor ? ` cursor=${cursor.slice(0, 20)}...` : ""}`, async () => {
     const res = await fetch(url, {
       headers: {
         "Authorization": `Basic ${Buffer.from(`${userEmail}:${apiToken}`).toString("base64")}`,
@@ -92,11 +94,11 @@ export async function searchJiraIssues(
     }));
     return {
       issues: {
-        // /search/jql returns isLast instead of total
-        totalCount: data.total ?? (data.isLast ? startAt + issues.length : startAt + maxResults + 1),
+        totalCount: data.total ?? issues.length,
         nodes: issues,
         isLast: data.isLast ?? true,
       },
+      nextPageToken: data.nextPageToken ?? undefined,
     };
   });
 }
@@ -109,17 +111,17 @@ export async function fetchAllJiraIssues(
   fields?: string[],
 ): Promise<JiraIssueNode[]> {
   const all: JiraIssueNode[] = [];
-  let startAt = 0;
+  let cursor: string | undefined;
   const pageSize = 100;
 
   while (true) {
-    const response = await searchJiraIssues(cloudId, apiToken, userEmail, jql, fields, pageSize, startAt);
+    const response = await searchJiraIssues(cloudId, apiToken, userEmail, jql, fields, pageSize, cursor);
     all.push(...response.issues.nodes);
 
     console.log(`[jira-sync] Fetched ${response.issues.nodes.length} issues (total: ${all.length})`);
 
-    if (response.issues.isLast || response.issues.nodes.length === 0) break;
-    startAt += pageSize;
+    if (response.issues.isLast || response.issues.nodes.length === 0 || !response.nextPageToken) break;
+    cursor = response.nextPageToken;
   }
 
   return all;
@@ -132,7 +134,7 @@ export async function testJiraConnection(
 ): Promise<{ ok: boolean; error?: string }> {
   try {
     const site = cloudId.includes(".") ? cloudId : `${cloudId}.atlassian.net`;
-    await searchJiraIssues(site, apiToken, userEmail, "project is not EMPTY", ["summary"], 1);
+    await searchJiraIssues(site, apiToken, userEmail, "project is not EMPTY", ["summary"], 1, undefined);
     return { ok: true };
   } catch (e: unknown) {
     const msg = e instanceof Error ? e.message : "Unknown error";
