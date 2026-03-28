@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { sql, and, gte, lte, eq, or, isNotNull, desc } from "drizzle-orm";
 import { getDb } from "@/lib/db";
-import { pullRequests, users, repos, prReviews, claudeCodeUsage } from "@/lib/db/schema";
+import { pullRequests, users, repos, prReviews, claudeCodeUsage, jiraIssues } from "@/lib/db/schema";
 import { formatDate, MONDAY_OFFSET } from "@/lib/metrics/utils";
 
 export async function GET(request: NextRequest) {
@@ -168,6 +168,61 @@ export async function GET(request: NextRequest) {
     }
   }
 
+  // Jira tickets — interleaved timeline with PRs
+  let weeklyTickets: Array<{ week: string; resolved: number }> = [];
+  let recentTickets: Array<{ jiraKey: string; summary: string; status: string; issueType: string | null; resolvedAt: number | null; createdAt: number; url: string | null }> = [];
+
+  if (userRecord?.id) {
+    try {
+      const ticketWeeks = await db
+        .select({
+          week: sql<number>`((${jiraIssues.resolvedAt} + ${MONDAY_OFFSET}) - ((${jiraIssues.resolvedAt} + ${MONDAY_OFFSET}) % 604800)) - ${MONDAY_OFFSET}`.as("week"),
+          resolved: sql<number>`count(*)`.as("resolved"),
+        })
+        .from(jiraIssues)
+        .where(
+          and(
+            eq(jiraIssues.userId, userRecord.id),
+            eq(jiraIssues.status, "Done"),
+            isNotNull(jiraIssues.resolvedAt),
+            gte(jiraIssues.resolvedAt, startDate),
+            lte(jiraIssues.resolvedAt, endDate),
+          ),
+        )
+        .groupBy(sql`week`)
+        .orderBy(sql`week`);
+
+      weeklyTickets = ticketWeeks.map((r) => ({
+        week: formatDate(r.week),
+        resolved: r.resolved,
+      }));
+
+      recentTickets = await db
+        .select({
+          jiraKey: jiraIssues.jiraKey,
+          summary: jiraIssues.summary,
+          status: jiraIssues.status,
+          issueType: jiraIssues.issueType,
+          resolvedAt: jiraIssues.resolvedAt,
+          createdAt: jiraIssues.createdAt,
+          url: jiraIssues.url,
+        })
+        .from(jiraIssues)
+        .where(
+          and(
+            eq(jiraIssues.userId, userRecord.id),
+            or(
+              and(eq(jiraIssues.status, "Done"), gte(jiraIssues.resolvedAt, startDate), lte(jiraIssues.resolvedAt, endDate)),
+              and(eq(jiraIssues.status, "In Progress"), gte(jiraIssues.createdAt, startDate), lte(jiraIssues.createdAt, endDate)),
+            ),
+          ),
+        )
+        .orderBy(desc(jiraIssues.resolvedAt), desc(jiraIssues.createdAt));
+    } catch {
+      // Jira table may not exist yet
+    }
+  }
+
   return NextResponse.json({
     user,
     weeklyPrs: weeklyPrs.map((r) => ({
@@ -179,5 +234,7 @@ export async function GET(request: NextRequest) {
     recentPrs,
     aiWeekly,
     aiSummary,
+    weeklyTickets,
+    recentTickets,
   });
 }
