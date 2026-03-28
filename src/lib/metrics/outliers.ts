@@ -269,8 +269,12 @@ export async function getOutliers(startDate: number, endDate: number): Promise<O
     const jiraLogins = new Set(jiraByUser.map((r) => r.login));
     const prLogins = new Set(prsMerged.filter((r) => !EXCLUDED_LOGINS.has(r.login)).map((r) => r.login));
 
+    // Skip activity gap detection if Jira has no data at all (sync not configured)
+    const hasJiraData = jiraByUser.length > 0;
+
     // Active in GitHub but zero Jira tickets
     for (const login of prLogins) {
+      if (!hasJiraData) break;
       if (!jiraLogins.has(login)) {
         const user = prsMerged.find((r) => r.login === login);
         outliers.push({
