@@ -1,4 +1,7 @@
-import { median } from "./utils";
+import { sql, and, gte, lte, eq } from "drizzle-orm";
+import { getDb } from "../db";
+import { pullRequests, prFiles, prReviews, users, settings } from "../db/schema";
+import { median, formatDate, MONDAY_OFFSET } from "./utils";
 
 export interface PRInput {
   filteredAdditions: number;
@@ -110,6 +113,127 @@ export interface PersonTrueThroughput {
 export interface TrueThroughputDistribution {
   buckets: Array<{ bucket: ScoredPR["bucket"]; count: number; minScore: number; maxScore: number | null }>;
   summary: { totalWeighted: number; totalRaw: number; medianScore: number; avgScore: number };
+}
+
+async function getChurnWindowSeconds(): Promise<number> {
+  const db = getDb();
+  const row = await db.select().from(settings).where(eq(settings.key, "churn_window_days")).get();
+  const days = row?.value ? parseInt(row.value) : 14;
+  return days * 86400;
+}
+
+export async function computeAllScores(startDate: number, endDate: number): Promise<ScoredPRWithMeta[]> {
+  const db = getDb();
+
+  const weekExpr = sql<number>`((${pullRequests.mergedAt} + ${MONDAY_OFFSET}) - ((${pullRequests.mergedAt} + ${MONDAY_OFFSET}) % 604800)) - ${MONDAY_OFFSET}`;
+
+  const rawPRs = await db
+    .select({
+      prId: pullRequests.id,
+      authorLogin: users.githubLogin,
+      authorAvatarUrl: users.avatarUrl,
+      mergedAt: pullRequests.mergedAt,
+      createdAt: pullRequests.createdAt,
+      filteredAdditions: pullRequests.filteredAdditions,
+      filteredDeletions: pullRequests.filteredDeletions,
+      week: weekExpr.as("week"),
+    })
+    .from(pullRequests)
+    .innerJoin(users, eq(pullRequests.authorId, users.id))
+    .where(
+      and(
+        eq(pullRequests.state, "MERGED"),
+        gte(pullRequests.mergedAt, startDate),
+        lte(pullRequests.mergedAt, endDate),
+      ),
+    );
+
+  if (rawPRs.length === 0) return [];
+
+  const fileCounts = await db
+    .select({
+      prId: prFiles.prId,
+      fileCount: sql<number>`count(*)`.as("file_count"),
+    })
+    .from(prFiles)
+    .where(eq(prFiles.isExcluded, false))
+    .groupBy(prFiles.prId);
+
+  const fileCountMap = new Map(fileCounts.map((r) => [r.prId, r.fileCount]));
+
+  const reviewCounts = await db
+    .select({
+      prId: prReviews.prId,
+      reviewCount: sql<number>`count(*)`.as("review_count"),
+    })
+    .from(prReviews)
+    .where(
+      sql`${prReviews.state} IN ('CHANGES_REQUESTED', 'APPROVED')`,
+    )
+    .groupBy(prReviews.prId);
+
+  const reviewCountMap = new Map(reviewCounts.map((r) => [r.prId, r.reviewCount]));
+
+  const churnWindowSec = await getChurnWindowSeconds();
+
+  const allFiles = await db
+    .select({
+      prId: prFiles.prId,
+      filename: prFiles.filename,
+    })
+    .from(prFiles)
+    .where(eq(prFiles.isExcluded, false));
+
+  const filesByPr = new Map<number, Set<string>>();
+  for (const f of allFiles) {
+    if (!filesByPr.has(f.prId)) filesByPr.set(f.prId, new Set());
+    filesByPr.get(f.prId)!.add(f.filename);
+  }
+
+  const sortedPRs = rawPRs
+    .filter((p) => p.mergedAt !== null)
+    .sort((a, b) => a.mergedAt! - b.mergedAt!);
+
+  const churnRatioMap = new Map<number, number>();
+  for (let i = 0; i < sortedPRs.length; i++) {
+    const pr = sortedPRs[i];
+    const prFileSet = filesByPr.get(pr.prId);
+    if (!prFileSet || prFileSet.size === 0) {
+      churnRatioMap.set(pr.prId, 0);
+      continue;
+    }
+
+    const overlapping = new Set<string>();
+    for (let j = 0; j < sortedPRs.length; j++) {
+      if (i === j) continue;
+      const other = sortedPRs[j];
+      if (Math.abs(other.mergedAt! - pr.mergedAt!) > churnWindowSec) continue;
+
+      const otherFiles = filesByPr.get(other.prId);
+      if (!otherFiles) continue;
+
+      for (const f of prFileSet) {
+        if (otherFiles.has(f)) overlapping.add(f);
+      }
+    }
+
+    churnRatioMap.set(pr.prId, overlapping.size / prFileSet.size);
+  }
+
+  const prInputs = rawPRs.map((pr) => ({
+    prId: pr.prId,
+    authorLogin: pr.authorLogin,
+    authorAvatarUrl: pr.authorAvatarUrl,
+    mergedAtWeek: formatDate(pr.week),
+    filteredAdditions: pr.filteredAdditions ?? 0,
+    filteredDeletions: pr.filteredDeletions ?? 0,
+    filesChanged: fileCountMap.get(pr.prId) ?? 0,
+    reviewCount: reviewCountMap.get(pr.prId) ?? 0,
+    hoursToMerge: Math.max(((pr.mergedAt ?? pr.createdAt) - pr.createdAt) / 3600, 0),
+    churnRatio: churnRatioMap.get(pr.prId) ?? 0,
+  }));
+
+  return normalizePRScores(prInputs);
 }
 
 export function aggregateWeekly(scored: ScoredPRWithMeta[]): WeeklyTrueThroughput[] {
