@@ -4,6 +4,7 @@ import { getLinesPerPerson } from "@/lib/metrics/lines";
 import { getReviewLoad } from "@/lib/metrics/review-load";
 import { getMergeTimePerPerson } from "@/lib/metrics/merge-time";
 import { getPerPersonAiStats } from "@/lib/metrics/ai-usage";
+import { computeAllScores, aggregatePerPerson } from "@/lib/metrics/true-throughput";
 
 export async function GET(request: NextRequest) {
   const { searchParams } = new URL(request.url);
@@ -11,12 +12,13 @@ export async function GET(request: NextRequest) {
   const startDate = Number(searchParams.get("startDate")) || now - 30 * 86400;
   const endDate = Number(searchParams.get("endDate")) || now;
 
-  const [prsMerged, lines, reviews, mergeTimes, aiStats] = await Promise.all([
+  const [prsMerged, lines, reviews, mergeTimes, aiStats, ttPerPerson] = await Promise.all([
     getPrsMergedPerPerson(startDate, endDate),
     getLinesPerPerson(startDate, endDate),
     getReviewLoad(startDate, endDate),
     getMergeTimePerPerson(startDate, endDate),
     getPerPersonAiStats(startDate, endDate).catch(() => []),
+    computeAllScores(startDate, endDate).then(aggregatePerPerson).catch(() => []),
   ]);
 
   const people: Record<string, {
@@ -29,6 +31,8 @@ export async function GET(request: NextRequest) {
     medianMergeTimeHours: number | null;
     aiSessions: number;
     aiPrPercent: number;
+    trueThroughput: number;
+    ttAvgScore: number;
   }> = {};
 
   const ensure = (login: string, avatarUrl: string | null) => {
@@ -43,6 +47,8 @@ export async function GET(request: NextRequest) {
         medianMergeTimeHours: null,
         aiSessions: 0,
         aiPrPercent: 0,
+        trueThroughput: 0,
+        ttAvgScore: 0,
       };
     }
   };
@@ -74,6 +80,15 @@ export async function GET(request: NextRequest) {
     if (ai) {
       p.aiSessions = ai.sessions ?? 0;
       p.aiPrPercent = p.prsMerged > 0 ? Math.round(((ai.prs ?? 0) / p.prsMerged) * 100) : 0;
+    }
+  }
+
+  const ttByLogin = new Map(ttPerPerson.map((r) => [r.login, r]));
+  for (const [login, p] of Object.entries(people)) {
+    const tt = ttByLogin.get(login);
+    if (tt) {
+      p.trueThroughput = tt.trueThroughput;
+      p.ttAvgScore = tt.avgScore;
     }
   }
 

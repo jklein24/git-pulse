@@ -14,6 +14,8 @@ interface LeaderboardEntry {
   medianMergeTimeHours: number;
   aiSessions?: number;
   aiPrPercent?: number;
+  trueThroughput: number;
+  ttAvgScore: number;
 }
 
 function rankIndicator(index: number, total: number): string {
@@ -68,6 +70,7 @@ export default function LeaderboardPage() {
                 <th className="px-4 py-3 w-12">#</th>
                 <th className="px-4 py-3">Engineer</th>
                 <th className="px-4 py-3 text-right">PRs</th>
+                <th className="px-4 py-3 text-right">Weighted</th>
                 <th className="px-4 py-3 text-right">Lines +/&minus;</th>
                 <th className="px-4 py-3 text-right">Reviews</th>
                 <th className="px-4 py-3 text-right">Merge (h)</th>
@@ -92,6 +95,7 @@ export default function LeaderboardPage() {
                     </div>
                   </td>
                   <td className="px-4 py-3 text-right font-mono text-text-primary">{entry.prsMerged}</td>
+                  <td className="px-4 py-3 text-right font-mono text-accent">{entry.trueThroughput.toFixed(1)}</td>
                   <td className="px-4 py-3 text-right font-mono">
                     <span className="text-success">+{entry.linesAdded.toLocaleString()}</span>
                     <span className="text-text-muted mx-1">/</span>
