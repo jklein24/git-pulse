@@ -15,6 +15,9 @@ import MergeTimeBySizeChart from "@/components/charts/MergeTimeBySizeChart";
 import AiUsageTrendChart from "@/components/charts/AiUsageTrendChart";
 import ProductivityConcentrationChart from "@/components/charts/ProductivityConcentrationChart";
 import ContributorMovementChart from "@/components/charts/ContributorMovementChart";
+import TrueThroughputChart from "@/components/charts/TrueThroughputChart";
+import TrueThroughputPerPersonChart from "@/components/charts/TrueThroughputPerPersonChart";
+import TrueThroughputDistributionChart from "@/components/charts/TrueThroughputDistributionChart";
 
 function InfoTooltip({ text }: { text: string }) {
   return (
@@ -41,6 +44,9 @@ export default function TrendsPage() {
   const [aiTrend, setAiTrend] = useState<Array<{ week: string; sessions: number; linesAdded: number; activeUsers: number }>>([]);
   const [concentration, setConcentration] = useState<Array<{ month: string; contributors: number; top20PctPrShare: number; top30PctPrShare: number; top50PctPrShare: number; top20PctLineShare: number; top30PctLineShare: number; top50PctLineShare: number }>>([]);
   const [movement, setMovement] = useState<Array<{ month: string; growing: number; stable: number; declining: number; new: number; inactive: number }>>([]);
+  const [ttWeekly, setTtWeekly] = useState<Array<{ week: string; trueThroughput: number; rawPrCount: number; avgScore: number }>>([]);
+  const [ttPerPerson, setTtPerPerson] = useState<Array<{ login: string; avatarUrl: string | null; trueThroughput: number; rawPrCount: number; avgScore: number }>>([]);
+  const [ttDistribution, setTtDistribution] = useState<{ buckets: Array<{ bucket: "XS" | "S" | "M" | "L" | "XL"; count: number; minScore: number; maxScore: number | null }>; summary: { totalWeighted: number; totalRaw: number; medianScore: number; avgScore: number } } | null>(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -57,7 +63,8 @@ export default function TrendsPage() {
       fetch(`/api/metrics/review-iterations?${qs}`).then((r) => r.json()),
       fetch(`/api/metrics/ai-usage?${qs}`).then((r) => r.json()).catch(() => ({})),
       fetch(`/api/metrics/productivity-distribution?${qs}`).then((r) => r.json()).catch(() => ({})),
-    ]).then(([tp, mt, rv, rl, ln, ch, ri, ai, pd]) => {
+      fetch(`/api/metrics/true-throughput?${qs}`).then((r) => r.json()).catch(() => ({})),
+    ]).then(([tp, mt, rv, rl, ln, ch, ri, ai, pd, tt]) => {
       setThroughput(tp.teamThroughput || []);
       setMergeTime(mt.mergeTimeTrend || []);
       setMergeTimeBySize(mt.mergeTimeBySize || []);
@@ -76,6 +83,9 @@ export default function TrendsPage() {
       }
       setConcentration(pd.concentration || []);
       setMovement(pd.movement || []);
+      if (tt.weeklyTrend) setTtWeekly(tt.weeklyTrend);
+      if (tt.perPerson) setTtPerPerson(tt.perPerson);
+      if (tt.distribution) setTtDistribution(tt.distribution);
       setLoading(false);
     });
   }, [startDate, endDate]);
@@ -102,6 +112,30 @@ export default function TrendsPage() {
         <h2 className="text-base font-display font-semibold mb-4 text-text-secondary">Team Throughput</h2>
         <ThroughputChart data={throughput} onWeekClick={handleWeekClick} />
       </section>
+
+      {ttWeekly.length > 0 && (
+        <section>
+          <h2 className="text-base font-display font-semibold mb-4 text-text-secondary">
+            TrueThroughput
+            <InfoTooltip text="Weighted throughput that scores PRs by complexity (lines, files, reviews, merge time, churn) with a concentration discount for mechanical changes. A score of 1.0 = one median-complexity PR." />
+          </h2>
+          <TrueThroughputChart data={ttWeekly} onWeekClick={handleWeekClick} />
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mt-6">
+            {ttPerPerson.length > 0 && (
+              <div>
+                <h3 className="text-sm font-display font-semibold mb-3 text-text-muted">Per Person</h3>
+                <TrueThroughputPerPersonChart data={ttPerPerson} />
+              </div>
+            )}
+            {ttDistribution && (
+              <div>
+                <h3 className="text-sm font-display font-semibold mb-3 text-text-muted">Score Distribution</h3>
+                <TrueThroughputDistributionChart buckets={ttDistribution.buckets} summary={ttDistribution.summary} />
+              </div>
+            )}
+          </div>
+        </section>
+      )}
 
       {concentration.length > 1 && (
         <section>
