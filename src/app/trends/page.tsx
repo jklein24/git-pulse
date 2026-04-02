@@ -120,20 +120,21 @@ export default function TrendsPage() {
             <InfoTooltip text="Weighted throughput that scores PRs by complexity (lines, files, reviews, merge time, churn) with a concentration discount for mechanical changes. A score of 1.0 = one median-complexity PR." />
           </h2>
           <TrueThroughputChart data={ttWeekly} onWeekClick={handleWeekClick} />
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mt-6">
-            {ttPerPerson.length > 0 && (
-              <div>
-                <h3 className="text-sm font-display font-semibold mb-3 text-text-muted">Per Person</h3>
-                <TrueThroughputPerPersonChart data={ttPerPerson} />
-              </div>
-            )}
-            {ttDistribution && (
-              <div>
-                <h3 className="text-sm font-display font-semibold mb-3 text-text-muted">Score Distribution</h3>
-                <TrueThroughputDistributionChart buckets={ttDistribution.buckets} summary={ttDistribution.summary} />
-              </div>
-            )}
-          </div>
+          {ttDistribution && (
+            <div className="mt-6">
+              <h3 className="text-sm font-display font-semibold mb-3 text-text-muted">
+                Score Distribution
+                <InfoTooltip text="How PRs break down by complexity bucket. XS (< 0.4) = trivial changes, S (0.4–0.8) = small, M (0.8–1.3) = median complexity, L (1.3–2.0) = large, XL (> 2.0) = highly complex. Scores are relative to the team's median PR." />
+              </h3>
+              <TrueThroughputDistributionChart buckets={ttDistribution.buckets} summary={ttDistribution.summary} />
+            </div>
+          )}
+          {ttPerPerson.length > 0 && (
+            <div className="mt-6">
+              <h3 className="text-sm font-display font-semibold mb-3 text-text-muted">Per Person</h3>
+              <TrueThroughputPerPersonChart data={ttPerPerson} />
+            </div>
+          )}
         </section>
       )}
 
