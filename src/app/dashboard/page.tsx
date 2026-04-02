@@ -8,6 +8,7 @@ import { useDateRange } from "@/components/layout/DateContext";
 import { useSettings } from "@/components/layout/SettingsContext";
 import MetricCard from "@/components/layout/MetricCard";
 import ThroughputChart from "@/components/charts/ThroughputChart";
+import TrueThroughputChart from "@/components/charts/TrueThroughputChart";
 
 interface ThroughputData {
   week: string;
@@ -49,6 +50,8 @@ export default function DashboardPage() {
   const [aiPrs, setAiPrs] = useState(0);
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const [aiSparkline, setAiSparkline] = useState<Array<{ value: number }>>([]);
+  const [ttWeekly, setTtWeekly] = useState<Array<{ week: string; trueThroughput: number; rawPrCount: number; avgScore: number }>>([]);
+  const [ttSummary, setTtSummary] = useState<{ totalWeighted: number; totalRaw: number } | null>(null);
 
   const currentWeekStart = getCurrentWeekStart();
 
@@ -79,7 +82,8 @@ export default function DashboardPage() {
       fetch(`/api/metrics/throughput?startDate=${startDate}&endDate=${endDate}`).then((r) => r.json()),
       fetch(`/api/metrics/outliers?startDate=${startDate}&endDate=${endDate}`).then((r) => r.json()),
       fetch(`/api/metrics/ai-usage?startDate=${startDate}&endDate=${endDate}`).then((r) => r.json()).catch(() => ({})),
-    ]).then(([throughputData, outlierData, aiData]) => {
+      fetch(`/api/metrics/true-throughput?startDate=${startDate}&endDate=${endDate}`).then((r) => r.json()).catch(() => ({})),
+    ]).then(([throughputData, outlierData, aiData, ttData]) => {
       setThroughput(throughputData.teamThroughput || []);
       setOutliers([...(outlierData.outliers || []), ...(outlierData.trendOutliers || [])]);
       if (aiData.summary) {
@@ -88,6 +92,8 @@ export default function DashboardPage() {
       if (aiData.trend) {
         setAiSparkline(aiData.trend.map((t: { prs: number }) => ({ value: t.prs ?? 0 })));
       }
+      if (ttData.weeklyTrend) setTtWeekly(ttData.weeklyTrend);
+      if (ttData.distribution?.summary) setTtSummary(ttData.distribution.summary);
       setLoading(false);
     });
     fetchSummary(false);
@@ -144,6 +150,12 @@ export default function DashboardPage() {
           value={totalAdditions.toLocaleString()}
           sparklineData={throughput.map((w) => ({ value: w.additions }))}
           accentColor="#34D399"
+        />
+        <MetricCard
+          title="TrueThroughput"
+          value={ttSummary ? ttSummary.totalWeighted : "–"}
+          sparklineData={ttWeekly.map((w) => ({ value: w.trueThroughput }))}
+          accentColor="#22D3EE"
         />
         {aiPrs > 0 && (
           <MetricCard
@@ -263,6 +275,13 @@ export default function DashboardPage() {
         <h2 className="text-lg font-display font-semibold mb-4 text-text-secondary">Team Throughput</h2>
         <ThroughputChart data={throughput} onWeekClick={handleWeekClick} />
       </div>
+
+      {ttWeekly.length > 0 && (
+        <div>
+          <h2 className="text-lg font-display font-semibold mb-4 text-text-secondary">TrueThroughput</h2>
+          <TrueThroughputChart data={ttWeekly} onWeekClick={handleWeekClick} />
+        </div>
+      )}
     </div>
   );
 }
