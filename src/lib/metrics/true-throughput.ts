@@ -1,7 +1,7 @@
 import { sql, and, gte, lte, eq } from "drizzle-orm";
 import { getDb } from "../db";
 import { pullRequests, prFiles, prReviews, users, settings } from "../db/schema";
-import { median, formatDate, MONDAY_OFFSET } from "./utils";
+import { percentile, formatDate, MONDAY_OFFSET } from "./utils";
 
 export interface PRInput {
   filteredAdditions: number;
@@ -29,15 +29,11 @@ const WEIGHTS = {
 };
 
 const BUCKET_THRESHOLDS: Array<{ bucket: ScoredPR["bucket"]; max: number }> = [
-  { bucket: "XS", max: 0.4 },
-  { bucket: "S", max: 0.8 },
-  { bucket: "M", max: 1.3 },
-  { bucket: "L", max: 2.0 },
+  { bucket: "XS", max: 0.5 },
+  { bucket: "S", max: 1.0 },
+  { bucket: "M", max: 2.0 },
+  { bucket: "L", max: 4.0 },
 ];
-
-function log2(n: number): number {
-  return Math.log2(1 + n);
-}
 
 function clamp(value: number, min: number, max: number): number {
   return Math.min(max, Math.max(min, value));
@@ -53,14 +49,14 @@ function getBucket(normalizedScore: number): ScoredPR["bucket"] {
 export function scorePR(pr: PRInput): { rawScore: number; concentrationMultiplier: number; finalScore: number } {
   const lines = pr.filteredAdditions + pr.filteredDeletions;
   const rawScore =
-    WEIGHTS.lines * log2(lines) +
-    WEIGHTS.files * log2(pr.filesChanged) +
-    WEIGHTS.reviews * Math.max(pr.reviewCount, 1) +
-    WEIGHTS.mergeTime * log2(pr.hoursToMerge) +
+    WEIGHTS.lines * Math.sqrt(lines) +
+    WEIGHTS.files * Math.sqrt(pr.filesChanged) +
+    WEIGHTS.reviews * Math.sqrt(Math.max(pr.reviewCount, 1)) +
+    WEIGHTS.mergeTime * Math.log2(1 + pr.hoursToMerge) +
     WEIGHTS.churn * pr.churnRatio;
 
   const linesPerFile = lines / Math.max(pr.filesChanged, 1);
-  const concentrationMultiplier = clamp(linesPerFile / 10, 0.2, 1.0);
+  const concentrationMultiplier = clamp(linesPerFile / 25, 0.3, 1.0);
 
   return {
     rawScore,
@@ -84,8 +80,8 @@ export function normalizePRScores(
     return { ...pr, rawScore, concentrationMultiplier, finalScore, normalizedScore: 0, bucket: "M" as ScoredPR["bucket"] };
   });
 
-  const medianFinal = median(scored.map((s) => s.finalScore));
-  const divisor = medianFinal > 0 ? medianFinal : 1;
+  const p25 = percentile(scored.map((s) => s.finalScore), 25);
+  const divisor = p25 > 0 ? p25 : 1;
 
   for (const s of scored) {
     s.normalizedScore = Math.round((s.finalScore / divisor) * 100) / 100;
@@ -275,11 +271,11 @@ export function aggregatePerPerson(scored: ScoredPRWithMeta[]): PersonTrueThroug
 
 export function aggregateDistribution(scored: ScoredPRWithMeta[]): TrueThroughputDistribution {
   const bucketDefs: Array<{ bucket: ScoredPR["bucket"]; minScore: number; maxScore: number | null }> = [
-    { bucket: "XS", minScore: 0, maxScore: 0.4 },
-    { bucket: "S", minScore: 0.4, maxScore: 0.8 },
-    { bucket: "M", minScore: 0.8, maxScore: 1.3 },
-    { bucket: "L", minScore: 1.3, maxScore: 2.0 },
-    { bucket: "XL", minScore: 2.0, maxScore: null },
+    { bucket: "XS", minScore: 0, maxScore: 0.5 },
+    { bucket: "S", minScore: 0.5, maxScore: 1.0 },
+    { bucket: "M", minScore: 1.0, maxScore: 2.0 },
+    { bucket: "L", minScore: 2.0, maxScore: 4.0 },
+    { bucket: "XL", minScore: 4.0, maxScore: null },
   ];
 
   const counts = new Map<string, number>(bucketDefs.map((b) => [b.bucket, 0]));
@@ -295,7 +291,7 @@ export function aggregateDistribution(scored: ScoredPRWithMeta[]): TrueThroughpu
     summary: {
       totalWeighted,
       totalRaw: scored.length,
-      medianScore: scored.length > 0 ? Math.round(median(scores) * 100) / 100 : 0,
+      medianScore: scored.length > 0 ? Math.round(percentile(scores, 50) * 100) / 100 : 0,
       avgScore: scored.length > 0 ? Math.round((totalWeighted / scored.length) * 100) / 100 : 0,
     },
   };

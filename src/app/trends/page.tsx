@@ -124,7 +124,7 @@ export default function TrendsPage() {
             <div className="mt-6">
               <h3 className="text-sm font-display font-semibold mb-3 text-text-muted">
                 Score Distribution
-                <InfoTooltip text="How PRs break down by complexity bucket. XS (< 0.4) = trivial changes, S (0.4–0.8) = small, M (0.8–1.3) = median complexity, L (1.3–2.0) = large, XL (> 2.0) = highly complex. Scores are relative to the team's median PR." />
+                <InfoTooltip text="How PRs break down by complexity bucket. XS (< 0.5) = trivial changes, S (0.5–1.0) = small, M (1.0–2.0) = moderate, L (2.0–4.0) = large, XL (> 4.0) = highly complex. A score of 1.0 = a 25th-percentile PR, so most PRs score above 1." />
               </h3>
               <TrueThroughputDistributionChart buckets={ttDistribution.buckets} summary={ttDistribution.summary} />
             </div>
