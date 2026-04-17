@@ -69,6 +69,21 @@ function AiSparkIcon({ className }: { className?: string }) {
   );
 }
 
+function CalculatorIcon({ className }: { className?: string }) {
+  return (
+    <svg className={className} viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+      <rect x="3" y="2" width="14" height="16" rx="2" />
+      <rect x="5.5" y="4.5" width="9" height="3" rx="0.5" />
+      <circle cx="7" cy="11" r="0.7" fill="currentColor" />
+      <circle cx="10" cy="11" r="0.7" fill="currentColor" />
+      <circle cx="13" cy="11" r="0.7" fill="currentColor" />
+      <circle cx="7" cy="14" r="0.7" fill="currentColor" />
+      <circle cx="10" cy="14" r="0.7" fill="currentColor" />
+      <circle cx="13" cy="14" r="0.7" fill="currentColor" />
+    </svg>
+  );
+}
+
 function GearIcon({ className }: { className?: string }) {
   return (
     <svg className={className} viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
@@ -85,6 +100,7 @@ const NAV_ITEMS = [
   { href: "/trends", label: "Trends", Icon: TrendUpIcon },
   { href: "/outliers", label: "Outliers", Icon: AlertIcon },
   { href: "/ai-impact", label: "AI Impact", Icon: AiSparkIcon },
+  { href: "/simulator", label: "Simulator", Icon: CalculatorIcon },
   { href: "/settings", label: "Settings", Icon: GearIcon },
 ];
 

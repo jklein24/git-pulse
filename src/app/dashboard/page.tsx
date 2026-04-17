@@ -9,6 +9,8 @@ import { useSettings } from "@/components/layout/SettingsContext";
 import MetricCard from "@/components/layout/MetricCard";
 import ThroughputChart from "@/components/charts/ThroughputChart";
 import TrueThroughputChart from "@/components/charts/TrueThroughputChart";
+import InfoTooltip from "@/components/layout/InfoTooltip";
+import Link from "next/link";
 
 interface ThroughputData {
   week: string;
@@ -271,17 +273,25 @@ export default function DashboardPage() {
         </div>
       )}
 
+      {ttWeekly.length > 0 && (
+        <div>
+          <div className="flex items-center justify-between mb-4">
+            <h2 className="text-lg font-display font-semibold text-text-secondary">
+              TrueThroughput
+              <InfoTooltip text="Weighted throughput that scores PRs by complexity (lines, files, reviews, merge time, churn) with a concentration discount for mechanical changes. A score of 1.0 = one small baseline PR." />
+            </h2>
+            <Link href="/simulator" className="text-xs text-text-muted hover:text-accent transition-colors">
+              How is this calculated?
+            </Link>
+          </div>
+          <TrueThroughputChart data={ttWeekly} onWeekClick={handleWeekClick} />
+        </div>
+      )}
+
       <div>
         <h2 className="text-lg font-display font-semibold mb-4 text-text-secondary">Team Throughput</h2>
         <ThroughputChart data={throughput} onWeekClick={handleWeekClick} />
       </div>
-
-      {ttWeekly.length > 0 && (
-        <div>
-          <h2 className="text-lg font-display font-semibold mb-4 text-text-secondary">TrueThroughput</h2>
-          <TrueThroughputChart data={ttWeekly} onWeekClick={handleWeekClick} />
-        </div>
-      )}
     </div>
   );
 }
