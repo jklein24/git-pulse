@@ -1,0 +1,45 @@
+image:
+  repository: ""
+  pullPolicy: IfNotPresent
+  tag: ""
+
+imagePullSecret: ""
+nameOverride: ""
+fullnameOverride: ""
+
+serviceAccount:
+  annotations:
+    eks.amazonaws.com/role-arn: ""
+
+replicaCount: 1
+
+service:
+  type: ClusterIP
+  port: 80
+  targetPort: 3000
+
+ingress:
+  domain: ""
+  annotations: {}
+
+secrets:
+  name: "gitpulse-secrets"
+
+resources:
+  requests:
+    cpu: "100m"
+    memory: "256Mi"
+  limits:
+    cpu: "500m"
+    memory: "512Mi"
+
+networkPolicy:
+  ingressCIDRs:
+    - "10.200.0.0/16"
+  ingressPodLabels: {}
+
+podAnnotations: {}
+nodeSelector:
+  node-group: general
+tolerations: []
+affinity: {}
