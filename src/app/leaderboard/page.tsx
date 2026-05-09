@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useDateRange } from "@/components/layout/DateContext";
 
@@ -18,6 +18,29 @@ interface LeaderboardEntry {
   ttAvgScore: number;
 }
 
+type SortKey =
+  | "login"
+  | "prsMerged"
+  | "trueThroughput"
+  | "linesAdded"
+  | "reviewCount"
+  | "medianMergeTimeHours"
+  | "aiSessions"
+  | "aiPrPercent";
+
+type SortDirection = "asc" | "desc";
+
+const NUMERIC_DEFAULT_DIRECTION: Record<SortKey, SortDirection> = {
+  login: "asc",
+  prsMerged: "desc",
+  trueThroughput: "desc",
+  linesAdded: "desc",
+  reviewCount: "desc",
+  medianMergeTimeHours: "asc",
+  aiSessions: "desc",
+  aiPrPercent: "desc",
+};
+
 function rankIndicator(index: number, total: number): string {
   if (index < 3) return "border-l-2 border-l-success/60";
   if (index >= total - 3 && total > 6) return "border-l-2 border-l-warning/60";
@@ -31,12 +54,19 @@ function rankBadge(index: number): React.ReactNode {
   return <span className="text-xs font-mono text-text-muted">{String(index + 1).padStart(2, "0")}</span>;
 }
 
+function sortIndicator(active: boolean, direction: SortDirection): string {
+  if (!active) return "↕";
+  return direction === "desc" ? "↓" : "↑";
+}
+
 export default function LeaderboardPage() {
   const router = useRouter();
   const { startDate, endDate } = useDateRange();
   const [data, setData] = useState<LeaderboardEntry[]>([]);
   const [hasAiData, setHasAiData] = useState(false);
   const [loading, setLoading] = useState(true);
+  const [sortKey, setSortKey] = useState<SortKey>("trueThroughput");
+  const [sortDirection, setSortDirection] = useState<SortDirection>("desc");
 
   useEffect(() => {
     setLoading(true);
@@ -48,6 +78,38 @@ export default function LeaderboardPage() {
         setLoading(false);
       });
   }, [startDate, endDate]);
+
+  const sortedData = useMemo(() => {
+    const copy = [...data];
+    copy.sort((a, b) => {
+      const av = a[sortKey];
+      const bv = b[sortKey];
+      if (typeof av === "string" && typeof bv === "string") {
+        return sortDirection === "asc" ? av.localeCompare(bv) : bv.localeCompare(av);
+      }
+      const an = (av ?? 0) as number;
+      const bn = (bv ?? 0) as number;
+      return sortDirection === "asc" ? an - bn : bn - an;
+    });
+    return copy;
+  }, [data, sortKey, sortDirection]);
+
+  function handleSort(key: SortKey) {
+    if (key === sortKey) {
+      setSortDirection((d) => (d === "asc" ? "desc" : "asc"));
+    } else {
+      setSortKey(key);
+      setSortDirection(NUMERIC_DEFAULT_DIRECTION[key]);
+    }
+  }
+
+  function headerClass(align: "left" | "right", key: SortKey) {
+    const active = sortKey === key;
+    const base = `px-4 py-3 cursor-pointer select-none hover:text-text-secondary transition-colors ${
+      align === "right" ? "text-right" : ""
+    }`;
+    return active ? `${base} text-accent` : base;
+  }
 
   return (
     <div className="space-y-6">
@@ -68,22 +130,42 @@ export default function LeaderboardPage() {
             <thead>
               <tr className="text-left text-[11px] font-display font-semibold text-text-muted uppercase tracking-widest border-b border-border">
                 <th className="px-4 py-3 w-12">#</th>
-                <th className="px-4 py-3">Engineer</th>
-                <th className="px-4 py-3 text-right">PRs</th>
-                <th className="px-4 py-3 text-right">Weighted</th>
-                <th className="px-4 py-3 text-right">Lines +/&minus;</th>
-                <th className="px-4 py-3 text-right">Reviews</th>
-                <th className="px-4 py-3 text-right">Merge (h)</th>
-                {hasAiData && <th className="px-4 py-3 text-right">AI Sessions</th>}
-                {hasAiData && <th className="px-4 py-3 text-right">AI %</th>}
+                <th className={headerClass("left", "login")} onClick={() => handleSort("login")}>
+                  Engineer <span className="ml-1 opacity-60">{sortIndicator(sortKey === "login", sortDirection)}</span>
+                </th>
+                <th className={headerClass("right", "prsMerged")} onClick={() => handleSort("prsMerged")}>
+                  PRs <span className="ml-1 opacity-60">{sortIndicator(sortKey === "prsMerged", sortDirection)}</span>
+                </th>
+                <th className={headerClass("right", "trueThroughput")} onClick={() => handleSort("trueThroughput")}>
+                  Weighted <span className="ml-1 opacity-60">{sortIndicator(sortKey === "trueThroughput", sortDirection)}</span>
+                </th>
+                <th className={headerClass("right", "linesAdded")} onClick={() => handleSort("linesAdded")}>
+                  Lines +/&minus; <span className="ml-1 opacity-60">{sortIndicator(sortKey === "linesAdded", sortDirection)}</span>
+                </th>
+                <th className={headerClass("right", "reviewCount")} onClick={() => handleSort("reviewCount")}>
+                  Reviews <span className="ml-1 opacity-60">{sortIndicator(sortKey === "reviewCount", sortDirection)}</span>
+                </th>
+                <th className={headerClass("right", "medianMergeTimeHours")} onClick={() => handleSort("medianMergeTimeHours")}>
+                  Merge (h) <span className="ml-1 opacity-60">{sortIndicator(sortKey === "medianMergeTimeHours", sortDirection)}</span>
+                </th>
+                {hasAiData && (
+                  <th className={headerClass("right", "aiSessions")} onClick={() => handleSort("aiSessions")}>
+                    AI Sessions <span className="ml-1 opacity-60">{sortIndicator(sortKey === "aiSessions", sortDirection)}</span>
+                  </th>
+                )}
+                {hasAiData && (
+                  <th className={headerClass("right", "aiPrPercent")} onClick={() => handleSort("aiPrPercent")}>
+                    AI % <span className="ml-1 opacity-60">{sortIndicator(sortKey === "aiPrPercent", sortDirection)}</span>
+                  </th>
+                )}
               </tr>
             </thead>
             <tbody>
-              {data.map((entry, idx) => (
+              {sortedData.map((entry, idx) => (
                 <tr
                   key={entry.login}
                   onClick={() => router.push(`/person/${entry.login}`)}
-                  className={`border-b border-border/40 hover:bg-bg-tertiary/50 transition-colors cursor-pointer ${rankIndicator(idx, data.length)}`}
+                  className={`border-b border-border/40 hover:bg-bg-tertiary/50 transition-colors cursor-pointer ${rankIndicator(idx, sortedData.length)}`}
                 >
                   <td className="px-4 py-3">{rankBadge(idx)}</td>
                   <td className="px-4 py-3">
