@@ -22,6 +22,13 @@
       "when": 1774631791688,
       "tag": "0002_ambitious_marten_broadcloak",
       "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "6",
+      "when": 1778446627394,
+      "tag": "0003_lively_red_ghost",
+      "breakpoints": true
     }
   ]
 }

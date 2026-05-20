@@ -67,6 +67,19 @@ function SettingsPage() {
   const [jiraUserEmail, setJiraUserEmail] = useState("");
   const [jiraApiToken, setJiraApiToken] = useState("");
   const [jiraProjects, setJiraProjects] = useState("SP, AT, ENG, PE, SEC, LP");
+  const [jiraExcludedEpics, setJiraExcludedEpics] = useState<Set<string>>(new Set());
+  const [availableEpics, setAvailableEpics] = useState<Array<{
+    key: string;
+    summary: string;
+    projectKey: string;
+    status: string;
+    dueDate: string | null;
+    lastActivity: string | null;
+    totalChildren: number;
+    doneChildren: number;
+    percentDone: number;
+  }>>([]);
+  const [epicFilter, setEpicFilter] = useState("");
   const [jiraSaving, setJiraSaving] = useState(false);
   const [jiraSaveStatus, setJiraSaveStatus] = useState<{ ok?: boolean; error?: string } | null>(null);
   const [jiraLastSynced, setJiraLastSynced] = useState<string | null>(null);
@@ -106,12 +119,23 @@ function SettingsPage() {
         if (data.jira_user_email) setJiraUserEmail(data.jira_user_email);
         if (data.jira_api_token) setJiraApiToken(data.jira_api_token);
         if (data.jira_projects) setJiraProjects(data.jira_projects);
+        if (data.jira_excluded_epics) {
+          setJiraExcludedEpics(
+            new Set(
+              data.jira_excluded_epics
+                .split(",")
+                .map((s: string) => s.trim().toUpperCase())
+                .filter(Boolean),
+            ),
+          );
+        }
       });
 
     fetch("/api/repos").then((r) => r.json()).then(setRepos);
     fetch("/api/sync").then((r) => r.json()).then((d) => setSyncJobs(d.jobs || []));
     fetch("/api/sync/claude").then((r) => r.json()).then((d) => setClaudeLastSynced(d.lastSynced));
     fetch("/api/sync/jira").then((r) => r.json()).then((d) => setJiraLastSynced(d.lastSynced));
+    fetch("/api/jira/epics").then((r) => r.json()).then((d) => setAvailableEpics(d.epics || []));
     fetch("/api/users").then((r) => r.json()).then((d) => {
       setUsersList(d.users || []);
       setUnmappedEmails(d.unmappedEmails || []);
@@ -229,6 +253,7 @@ function SettingsPage() {
         fetch("/api/settings", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ key: "jira_user_email", value: jiraUserEmail }) }),
         fetch("/api/settings", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ key: "jira_api_token", value: jiraApiToken }) }),
         fetch("/api/settings", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ key: "jira_projects", value: jiraProjects }) }),
+        fetch("/api/settings", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ key: "jira_excluded_epics", value: [...jiraExcludedEpics].join(", ") }) }),
       ]);
       setJiraSaveStatus({ ok: true });
     } catch {
@@ -600,6 +625,85 @@ function SettingsPage() {
               placeholder="SP, AT, ENG"
               className="flex-1 px-3 py-2 text-sm font-mono bg-bg-tertiary border border-border rounded-lg text-text-primary placeholder:text-text-muted focus:outline-none focus:border-accent/40 focus:shadow-[0_0_0_2px_rgba(34,211,238,0.08)] transition-all"
             />
+          </div>
+          <div className="flex gap-2 items-start">
+            <label className="text-sm text-text-secondary w-28 shrink-0 pt-2">Hidden epics</label>
+            <div className="flex-1 space-y-2">
+              {availableEpics.length === 0 ? (
+                <p className="text-xs text-text-muted py-2">
+                  No synced epics yet. Sync Jira data first, then return here to manage.
+                </p>
+              ) : (
+                <>
+                  <div className="flex items-center gap-2">
+                    <input
+                      value={epicFilter}
+                      onChange={(e) => setEpicFilter(e.target.value)}
+                      placeholder="Filter by key or summary"
+                      className="flex-1 px-3 py-1.5 text-xs font-mono bg-bg-tertiary border border-border rounded-lg text-text-primary placeholder:text-text-muted focus:outline-none focus:border-accent/40 focus:shadow-[0_0_0_2px_rgba(34,211,238,0.08)] transition-all"
+                    />
+                    <span className="text-[11px] font-mono text-text-muted whitespace-nowrap">
+                      {jiraExcludedEpics.size} hidden
+                    </span>
+                    {jiraExcludedEpics.size > 0 && (
+                      <button
+                        type="button"
+                        onClick={() => setJiraExcludedEpics(new Set())}
+                        className="text-[11px] font-mono text-text-muted hover:text-text-secondary underline"
+                      >
+                        show all
+                      </button>
+                    )}
+                  </div>
+                  <div className="max-h-72 overflow-y-auto rounded-lg border border-border divide-y divide-border/50">
+                    {availableEpics
+                      .filter((e) => {
+                        if (!epicFilter) return true;
+                        const q = epicFilter.toLowerCase();
+                        return (
+                          e.key.toLowerCase().includes(q) ||
+                          e.summary.toLowerCase().includes(q) ||
+                          e.projectKey.toLowerCase().includes(q)
+                        );
+                      })
+                      .map((e) => {
+                        const checked = jiraExcludedEpics.has(e.key);
+                        return (
+                          <label
+                            key={e.key}
+                            className="flex items-center gap-3 px-3 py-2 hover:bg-bg-tertiary/50 cursor-pointer"
+                          >
+                            <input
+                              type="checkbox"
+                              checked={checked}
+                              onChange={() => {
+                                setJiraExcludedEpics((prev) => {
+                                  const next = new Set(prev);
+                                  if (next.has(e.key)) next.delete(e.key);
+                                  else next.add(e.key);
+                                  return next;
+                                });
+                              }}
+                              className="w-3.5 h-3.5 accent-accent shrink-0"
+                            />
+                            <span className="font-mono text-[11px] text-accent w-20 shrink-0">{e.key}</span>
+                            <span className="flex-1 text-xs text-text-primary truncate">{e.summary}</span>
+                            <span className="font-mono text-[11px] text-text-muted whitespace-nowrap">
+                              {e.doneChildren}/{e.totalChildren} · {e.percentDone}%
+                            </span>
+                            <span className="font-mono text-[11px] text-text-muted w-24 text-right whitespace-nowrap">
+                              {e.dueDate ? `due ${e.dueDate}` : e.lastActivity ? `act ${e.lastActivity}` : "—"}
+                            </span>
+                          </label>
+                        );
+                      })}
+                  </div>
+                </>
+              )}
+              <p className="text-[11px] text-text-muted">
+                Check epics to hide from the Jira page. Defaults to showing all non-Done epics.
+              </p>
+            </div>
           </div>
         </div>
         <div className="flex items-center gap-3">

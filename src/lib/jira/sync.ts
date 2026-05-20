@@ -1,4 +1,4 @@
-import { eq, and } from "drizzle-orm";
+import { eq, and, isNull, isNotNull } from "drizzle-orm";
 import { getDb } from "../db";
 import { users, settings, jiraIssues } from "../db/schema";
 import { fetchAllJiraIssues, type JiraIssueNode } from "./client";
@@ -24,18 +24,16 @@ function buildEmailToUserMap(allUsers: { id: number; email: string | null }[]): 
   return map;
 }
 
-async function upsertIssue(
+function buildIssueValues(
   issue: JiraIssueNode,
   emailToUser: Map<string, number>,
-): Promise<boolean> {
-  const db = getDb();
+  urlPrefix: string,
+) {
   const f = issue.fields;
-
   const assigneeEmail = f.assignee?.emailAddress?.toLowerCase() ?? null;
   const userId = assigneeEmail ? (emailToUser.get(assigneeEmail) ?? null) : null;
-  const cloudId = await db.select().from(settings).where(eq(settings.key, "jira_cloud_id")).get();
 
-  const values = {
+  return {
     jiraKey: issue.key,
     projectKey: f.project?.key ?? issue.key.split("-")[0],
     summary: f.summary,
@@ -48,21 +46,10 @@ async function upsertIssue(
     createdAt: parseIsoToUnix(f.created) ?? Math.floor(Date.now() / 1000),
     updatedAt: parseIsoToUnix(f.updated),
     resolvedAt: parseIsoToUnix(f.resolutiondate),
-    url: cloudId?.value ? `https://${cloudId.value}/browse/${issue.key}` : null,
+    dueDate: parseIsoToUnix(f.duedate),
+    parentKey: f.parent?.key ?? null,
+    url: `${urlPrefix}${issue.key}`,
   };
-
-  const existing = await db
-    .select({ id: jiraIssues.id })
-    .from(jiraIssues)
-    .where(eq(jiraIssues.jiraKey, issue.key))
-    .get();
-
-  if (existing) {
-    await db.update(jiraIssues).set(values).where(eq(jiraIssues.id, existing.id));
-  } else {
-    await db.insert(jiraIssues).values(values);
-  }
-  return true;
 }
 
 export async function syncJiraData(): Promise<{
@@ -93,27 +80,37 @@ export async function syncJiraData(): Promise<{
 
   log(`Fetching Jira issues from ${sinceDate} for projects: ${projects}`);
 
+  const fetchStart = Date.now();
   const jql = `project in (${projects}) AND updated >= "${sinceDate}" ORDER BY updated DESC`;
   const issues = await fetchAllJiraIssues(cloudId, apiToken, userEmail, jql);
-  log(`Fetched ${issues.length} issues`);
+  log(`Fetched ${issues.length} issues in ${Math.round((Date.now() - fetchStart) / 100) / 10}s`);
 
   const allUsers = await db
     .select({ id: users.id, email: users.email })
     .from(users);
   const emailToUser = buildEmailToUserMap(allUsers);
 
+  const site = cloudId.includes(".") ? cloudId : `${cloudId}.atlassian.net`;
+  const urlPrefix = `https://${site}/browse/`;
+
   const unmappedAssignees = new Set<string>();
-  let processed = 0;
+  const upsertStart = Date.now();
 
   for (const issue of issues) {
-    await upsertIssue(issue, emailToUser);
-    processed++;
+    const values = buildIssueValues(issue, emailToUser, urlPrefix);
+    await db
+      .insert(jiraIssues)
+      .values(values)
+      .onConflictDoUpdate({ target: jiraIssues.jiraKey, set: values });
 
     const email = issue.fields.assignee?.emailAddress?.toLowerCase();
     if (email && !emailToUser.has(email)) {
       unmappedAssignees.add(email);
     }
   }
+
+  const processed = issues.length;
+  log(`Upserted ${processed} issues in ${Math.round((Date.now() - upsertStart) / 100) / 10}s`);
 
   const today = new Date().toISOString().slice(0, 10);
   await db
@@ -128,12 +125,15 @@ export async function syncJiraData(): Promise<{
 
 export async function remapJiraUsers(): Promise<number> {
   const db = getDb();
+  const start = Date.now();
+
   const allUsers = await db.select({ id: users.id, email: users.email }).from(users);
   const emailToUser = buildEmailToUserMap(allUsers);
 
   const unmapped = await db
     .select({ id: jiraIssues.id, assigneeEmail: jiraIssues.assigneeEmail })
     .from(jiraIssues)
+    .where(and(isNull(jiraIssues.userId), isNotNull(jiraIssues.assigneeEmail)))
     .all();
 
   let remapped = 0;
@@ -141,14 +141,11 @@ export async function remapJiraUsers(): Promise<number> {
     if (!row.assigneeEmail) continue;
     const userId = emailToUser.get(row.assigneeEmail.toLowerCase());
     if (userId) {
-      await db
-        .update(jiraIssues)
-        .set({ userId })
-        .where(eq(jiraIssues.id, row.id));
+      await db.update(jiraIssues).set({ userId }).where(eq(jiraIssues.id, row.id));
       remapped++;
     }
   }
 
-  log(`Remapped ${remapped} issues to users`);
+  log(`Remap pass: ${remapped} mapped of ${unmapped.length} candidates in ${Math.round((Date.now() - start) / 100) / 10}s`);
   return remapped;
 }

@@ -35,25 +35,75 @@ export async function POST(request: NextRequest) {
     `- "${pr.title}" by ${pr.authorLogin} in ${pr.repoFullName} (+${pr.filteredAdditions ?? 0}/-${pr.filteredDeletions ?? 0})`
   ).join("\n");
 
+  type TicketRow = { key: string; summary: string; projectKey: string; parentKey: string | null; assigneeName: string | null };
+  type ProjectCount = { projectKey: string; count: number };
+  type EpicRow = {
+    key: string;
+    summary: string;
+    projectKey: string;
+    status: string;
+    dueDate: string | null;
+    daysUntilDue: number | null;
+    doneChildren: number;
+    totalChildren: number;
+    percentDone: number;
+    resolvedLast7Days: number;
+    resolvedLast4Weeks: number;
+    trackingStatus: string;
+    isStarred: boolean;
+  };
+
+  const tickets: TicketRow[] = weekData.ticketsResolved || [];
+  const ticketsByProject: ProjectCount[] = weekData.ticketsByProject || [];
+  const epics: EpicRow[] = weekData.epicsInMotion || [];
+
+  const projectBreakdown = ticketsByProject.length === 0
+    ? "(none)"
+    : ticketsByProject.map((p) => `${p.projectKey}: ${p.count}`).join(", ");
+
+  const ticketLines = tickets.length === 0
+    ? "(none)"
+    : tickets.slice(0, 30).map((t) =>
+        `- ${t.key}: "${t.summary}"${t.parentKey ? ` (epic ${t.parentKey})` : ""}${t.assigneeName ? ` — ${t.assigneeName}` : ""}`,
+      ).join("\n");
+
+  const epicLines = epics.length === 0
+    ? "(none)"
+    : epics.map((e) => {
+        const star = e.isStarred ? "⭐ " : "";
+        const due = e.dueDate ? ` due ${e.dueDate}` : "";
+        const days = e.daysUntilDue !== null ? ` (${e.daysUntilDue}d)` : "";
+        return `- ${star}${e.key} "${e.summary}" — ${e.percentDone}% (${e.doneChildren}/${e.totalChildren}), ${e.resolvedLast7Days}/${e.resolvedLast4Weeks} resolved 7d/28d, ${e.trackingStatus}${due}${days}`;
+      }).join("\n");
+
   try {
     const response = await client.messages.create({
       model: "claude-sonnet-4-6",
-      max_tokens: 1024,
-      system: "You are a concise engineering manager writing a weekly PR summary for your team. Be specific and brief. Use markdown bullet points. Bold key names, repos, and metrics.",
+      max_tokens: 1500,
+      system: "You are a concise engineering manager writing a weekly team summary. Be specific and brief. Use markdown bullet points. Bold key names, epic IDs, and metrics. Never invent data — only reference what's in the input.",
       messages: [{
         role: "user",
         content: `Write a brief weekly engineering summary for the week of ${weekLabel}.
 
-Here are the ${weekData.prs?.length ?? 0} PRs merged this week:
-${prSummaries}
+## PRs merged (${weekData.prs?.length ?? 0})
+${prSummaries || "(none)"}
+
+## Tickets resolved (${tickets.length})
+By project: ${projectBreakdown}
+${ticketLines}
+
+## Active epics (starred or moving in last 4 weeks)
+${epicLines}
 
 Format your response as:
-- A one-sentence overall summary (e.g. "Active week with X PRs across Y repos, focused on ...")
-- **Key themes**: 3-5 bullet points, each one line max, highlighting what areas saw work
-- **Standout PRs**: 2-3 bullet points calling out the largest or most notable changes with author names bolded
-- **Activity**: one bullet noting total PR count and top contributors by volume
+- A one-sentence overall summary that ties shipping (PRs) to initiatives (epics).
+- **Shipped**: 2-4 bullets on what got built — themes from PRs, bold repo/author names.
+- **Epics in motion**: 2-4 bullets on which initiatives advanced this week, with **EPIC-KEY** bolded, % done, tracking status, and (if relevant) due date. Lead with starred epics.
+- **Standouts**: 1-2 bullets calling out the largest or most notable PRs with **author** bolded.
+- **Risks**: 0-2 bullets only if there are at-risk epics, overdue milestones, or epics with low resolved-7d. Omit the heading entirely if nothing to flag.
+- **Activity**: one bullet with total PR count, ticket count, and top 2-3 contributors.
 
-Keep every bullet to one line. No paragraphs. Be factual and specific.`,
+Keep every bullet to one line. No paragraphs. Be factual and specific. Do not list every PR or ticket — synthesize.`,
       }],
     });
 

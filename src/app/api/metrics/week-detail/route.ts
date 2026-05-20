@@ -1,7 +1,13 @@
 import { NextRequest, NextResponse } from "next/server";
 import { and, eq, gte, lt, lte, or, sql } from "drizzle-orm";
 import { getDb } from "@/lib/db";
-import { pullRequests, users, repos } from "@/lib/db/schema";
+import { pullRequests, users, repos, jiraIssues, settings } from "@/lib/db/schema";
+import { getEpicProgress } from "@/lib/metrics/tickets";
+
+function parseEpicKeys(raw: string | null | undefined): string[] {
+  if (!raw) return [];
+  return raw.split(",").map((s) => s.trim().toUpperCase()).filter(Boolean);
+}
 
 export async function GET(request: NextRequest) {
   const { searchParams } = new URL(request.url);
@@ -102,5 +108,54 @@ export async function GET(request: NextRequest) {
     }))
     .sort((a, b) => (b.opened + b.merged) - (a.opened + a.merged));
 
-  return NextResponse.json({ prs, leaderboard, prsByRepo });
+  const ticketsResolved = await db
+    .select({
+      key: jiraIssues.jiraKey,
+      summary: jiraIssues.summary,
+      projectKey: jiraIssues.projectKey,
+      parentKey: jiraIssues.parentKey,
+      assigneeName: jiraIssues.assigneeName,
+    })
+    .from(jiraIssues)
+    .where(
+      and(
+        eq(jiraIssues.status, "Done"),
+        gte(jiraIssues.resolvedAt, weekStart),
+        lt(jiraIssues.resolvedAt, weekEnd),
+      ),
+    );
+
+  const ticketsByProject = await db
+    .select({
+      projectKey: jiraIssues.projectKey,
+      count: sql<number>`count(*)`.as("count"),
+    })
+    .from(jiraIssues)
+    .where(
+      and(
+        eq(jiraIssues.status, "Done"),
+        gte(jiraIssues.resolvedAt, weekStart),
+        lt(jiraIssues.resolvedAt, weekEnd),
+      ),
+    )
+    .groupBy(jiraIssues.projectKey)
+    .orderBy(sql`count desc`);
+
+  const [excludedRow, starredRow] = await Promise.all([
+    db.select().from(settings).where(eq(settings.key, "jira_excluded_epics")).get(),
+    db.select().from(settings).where(eq(settings.key, "jira_starred_epics")).get(),
+  ]);
+  const allEpics = await getEpicProgress(parseEpicKeys(excludedRow?.value), parseEpicKeys(starredRow?.value));
+  const epicsInMotion = allEpics
+    .filter((e) => e.isStarred || (!e.isStale && e.resolvedLast4Weeks > 0))
+    .slice(0, 25);
+
+  return NextResponse.json({
+    prs,
+    leaderboard,
+    prsByRepo,
+    ticketsResolved,
+    ticketsByProject,
+    epicsInMotion,
+  });
 }

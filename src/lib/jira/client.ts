@@ -12,6 +12,8 @@ export interface JiraIssueFields {
   created: string;
   updated?: string;
   resolutiondate?: string | null;
+  duedate?: string | null;
+  parent?: { key: string } | null;
 }
 
 export interface JiraIssueNode {
@@ -20,11 +22,8 @@ export interface JiraIssueNode {
 }
 
 interface JiraSearchResponse {
-  issues: {
-    totalCount: number;
-    nodes: JiraIssueNode[];
-    isLast?: boolean;
-  };
+  nodes: JiraIssueNode[];
+  nextPageToken: string | null;
 }
 
 const RETRYABLE_STATUSES = new Set([429, 502, 503, 504]);
@@ -55,23 +54,22 @@ export async function searchJiraIssues(
   apiToken: string,
   userEmail: string,
   jql: string,
-  fields: string[] = ["summary", "status", "issuetype", "priority", "assignee", "created", "updated", "resolutiondate", "project"],
+  fields: string[] = ["summary", "status", "issuetype", "priority", "assignee", "created", "updated", "resolutiondate", "project", "duedate", "parent"],
   maxResults: number = 100,
-  startAt: number = 0,
+  nextPageToken?: string,
 ): Promise<JiraSearchResponse> {
-  // Use site-scoped URL with Basic auth (email:api-token)
-  // cloudId can be "foo.atlassian.net" or just "foo" — normalize to site URL
-  // Uses GET /rest/api/3/search/jql (POST /rest/api/3/search returns 410 Gone)
+  // Uses GET /rest/api/3/search/jql (cursor-based via nextPageToken; the old
+  // POST /rest/api/3/search with startAt returns 410 Gone).
   const site = cloudId.includes(".") ? cloudId : `${cloudId}.atlassian.net`;
   const params = new URLSearchParams({
     jql,
     fields: fields.join(","),
     maxResults: String(maxResults),
-    startAt: String(startAt),
   });
+  if (nextPageToken) params.set("nextPageToken", nextPageToken);
   const url = `https://${site}/rest/api/3/search/jql?${params}`;
 
-  return withRetry(`jira search startAt=${startAt}`, async () => {
+  return withRetry(`jira search token=${nextPageToken ?? "<start>"}`, async () => {
     const res = await fetch(url, {
       headers: {
         "Authorization": `Basic ${Buffer.from(`${userEmail}:${apiToken}`).toString("base64")}`,
@@ -86,20 +84,18 @@ export async function searchJiraIssues(
     }
 
     const data = await res.json();
-    const issues = (data.issues ?? []).map((issue: { key: string; fields: JiraIssueFields }) => ({
+    const nodes: JiraIssueNode[] = (data.issues ?? []).map((issue: { key: string; fields: JiraIssueFields }) => ({
       key: issue.key,
       fields: issue.fields,
     }));
     return {
-      issues: {
-        // /search/jql returns isLast instead of total
-        totalCount: data.total ?? (data.isLast ? startAt + issues.length : startAt + maxResults + 1),
-        nodes: issues,
-        isLast: data.isLast ?? true,
-      },
+      nodes,
+      nextPageToken: data.nextPageToken ?? null,
     };
   });
 }
+
+const MAX_FETCH_PAGES = 1000;
 
 export async function fetchAllJiraIssues(
   cloudId: string,
@@ -109,17 +105,30 @@ export async function fetchAllJiraIssues(
   fields?: string[],
 ): Promise<JiraIssueNode[]> {
   const all: JiraIssueNode[] = [];
-  let startAt = 0;
-  const pageSize = 100;
+  const seen = new Set<string>();
+  let nextPageToken: string | undefined;
+  let pageCount = 0;
 
-  while (true) {
-    const response = await searchJiraIssues(cloudId, apiToken, userEmail, jql, fields, pageSize, startAt);
-    all.push(...response.issues.nodes);
+  while (pageCount < MAX_FETCH_PAGES) {
+    const response = await searchJiraIssues(cloudId, apiToken, userEmail, jql, fields, 100, nextPageToken);
 
-    console.log(`[jira-sync] Fetched ${response.issues.nodes.length} issues (total: ${all.length})`);
+    let newOnThisPage = 0;
+    for (const issue of response.nodes) {
+      if (seen.has(issue.key)) continue;
+      seen.add(issue.key);
+      all.push(issue);
+      newOnThisPage++;
+    }
 
-    if (response.issues.isLast || response.issues.nodes.length === 0) break;
-    startAt += pageSize;
+    pageCount++;
+    console.log(`[jira-sync] Page ${pageCount}: +${newOnThisPage} new (total: ${all.length}, dupes: ${response.nodes.length - newOnThisPage})`);
+
+    if (!response.nextPageToken || response.nodes.length === 0 || newOnThisPage === 0) break;
+    nextPageToken = response.nextPageToken;
+  }
+
+  if (pageCount >= MAX_FETCH_PAGES) {
+    console.warn(`[jira-sync] Hit MAX_FETCH_PAGES (${MAX_FETCH_PAGES}) — aborting pagination`);
   }
 
   return all;

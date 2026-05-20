@@ -135,6 +135,8 @@ export const jiraIssues = sqliteTable("jira_issues", {
   createdAt: integer("created_at").notNull(),
   updatedAt: integer("updated_at"),
   resolvedAt: integer("resolved_at"),
+  dueDate: integer("due_date"),
+  parentKey: text("parent_key"),
   url: text("url"),
 }, (table) => [
   uniqueIndex("jira_key_idx").on(table.jiraKey),
@@ -143,6 +145,7 @@ export const jiraIssues = sqliteTable("jira_issues", {
   index("jira_status_idx").on(table.status),
   index("jira_resolved_at_idx").on(table.resolvedAt),
   index("jira_created_at_idx").on(table.createdAt),
+  index("jira_parent_key_idx").on(table.parentKey),
 ]);
 
 export const claudeCodeModelUsage = sqliteTable("claude_code_model_usage", {

@@ -84,6 +84,15 @@ function CalculatorIcon({ className }: { className?: string }) {
   );
 }
 
+function TicketIcon({ className }: { className?: string }) {
+  return (
+    <svg className={className} viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M3 7a1 1 0 011-1h12a1 1 0 011 1v2a2 2 0 000 4v2a1 1 0 01-1 1H4a1 1 0 01-1-1v-2a2 2 0 000-4V7z" />
+      <path d="M9 6v8" strokeDasharray="2 2" />
+    </svg>
+  );
+}
+
 function GearIcon({ className }: { className?: string }) {
   return (
     <svg className={className} viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
@@ -100,6 +109,7 @@ const NAV_ITEMS = [
   { href: "/trends", label: "Trends", Icon: TrendUpIcon },
   { href: "/outliers", label: "Outliers", Icon: AlertIcon },
   { href: "/ai-impact", label: "AI Impact", Icon: AiSparkIcon },
+  { href: "/jira", label: "Jira", Icon: TicketIcon },
   { href: "/simulator", label: "Simulator", Icon: CalculatorIcon },
   { href: "/settings", label: "Settings", Icon: GearIcon },
 ];
