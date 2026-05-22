@@ -18,9 +18,13 @@ export const users = sqliteTable("users", {
   githubId: integer("github_id"),
   avatarUrl: text("avatar_url"),
   email: text("email"),
+  pod: text("pod"),       // e.g. "Protocol", "Bitcoin", "PayX", "Fiat"
+  teamGroup: text("team_group"), // e.g. "Spark", "Atlas", "Cross-cutting"
+  role: text("role"),     // e.g. "IC", "Pod Lead", "EM", "Security Lead", "Prod Eng"
   firstSeenAt: integer("first_seen_at").notNull(),
 }, (table) => [
   uniqueIndex("users_github_login_idx").on(table.githubLogin),
+  index("users_pod_idx").on(table.pod),
 ]);
 
 export const pullRequests = sqliteTable("pull_requests", {

@@ -29,6 +29,13 @@
       "when": 1778446627394,
       "tag": "0003_lively_red_ghost",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "6",
+      "when": 1779397150769,
+      "tag": "0004_supreme_calypso",
+      "breakpoints": true
     }
   ]
 }
