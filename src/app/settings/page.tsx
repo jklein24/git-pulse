@@ -41,6 +41,7 @@ function SettingsPage() {
   const router = useRouter();
 
   const [hasToken, setHasToken] = useState(false);
+  const [githubAuthSource, setGithubAuthSource] = useState<"database" | "environment" | null>(null);
   const [githubLogin, setGithubLogin] = useState<string | null>(null);
   const [disconnecting, setDisconnecting] = useState(false);
   const [oauthBanner, setOauthBanner] = useState<{ type: "success" | "error"; message: string } | null>(null);
@@ -108,7 +109,8 @@ function SettingsPage() {
     fetch("/api/settings")
       .then((r) => r.json())
       .then((data) => {
-        if (data.github_pat) setHasToken(true);
+        setHasToken(Boolean(data.github_pat));
+        setGithubAuthSource(data.github_auth_source || null);
         if (data.github_login) setGithubLogin(data.github_login);
         if (data.exclude_globs) {
           try { setGlobs(JSON.parse(data.exclude_globs)); } catch {}
@@ -147,6 +149,7 @@ function SettingsPage() {
     try {
       await fetch("/api/auth/disconnect", { method: "POST" });
       setHasToken(false);
+      setGithubAuthSource(null);
       setGithubLogin(null);
       setOauthBanner(null);
     } finally {
@@ -351,15 +354,27 @@ function SettingsPage() {
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-2 text-sm text-success">
               <div className="w-2 h-2 rounded-full bg-success shadow-[0_0_6px_rgba(52,211,153,0.5)]" />
-              Connected as <span className="font-mono font-medium">@{githubLogin || "unknown"}</span>
+              {githubAuthSource === "environment" ? (
+                <>
+                  Connected via <span className="font-mono font-medium">GITHUB_PAT</span>
+                </>
+              ) : (
+                <>
+                  Connected as <span className="font-mono font-medium">@{githubLogin || "unknown"}</span>
+                </>
+              )}
             </div>
-            <button
-              onClick={disconnect}
-              disabled={disconnecting}
-              className="px-4 py-2 text-sm font-display font-semibold rounded-lg bg-danger/10 text-danger border border-danger/20 hover:bg-danger/15 hover:border-danger/40 disabled:opacity-50 transition-all"
-            >
-              {disconnecting ? "Disconnecting..." : "Disconnect"}
-            </button>
+            {githubAuthSource === "environment" ? (
+              <span className="text-xs text-text-muted">Set in .env.local</span>
+            ) : (
+              <button
+                onClick={disconnect}
+                disabled={disconnecting}
+                className="px-4 py-2 text-sm font-display font-semibold rounded-lg bg-danger/10 text-danger border border-danger/20 hover:bg-danger/15 hover:border-danger/40 disabled:opacity-50 transition-all"
+              >
+                {disconnecting ? "Disconnecting..." : "Disconnect"}
+              </button>
+            )}
           </div>
         ) : (
           <a

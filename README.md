@@ -12,6 +12,36 @@ npm run dev
 
 Then open [http://localhost:3000](http://localhost:3000) and configure your GitHub PAT and repositories in **Settings**.
 
+### GitHub authentication
+
+GitHub authentication can be configured in either of two ways:
+
+1. Set `GITHUB_PAT` in `.env.local`:
+
+   ```bash
+   GITHUB_PAT=github_pat_...
+   ```
+
+   Restart the dev server after changing `.env.local`. The app will use this
+   token without storing it in the local SQLite database. If a token is also
+   saved through Settings, the saved token takes precedence.
+
+2. Configure GitHub OAuth with `GITHUB_CLIENT_ID` and `GITHUB_CLIENT_SECRET`,
+   then use **Settings** -> **Sign in with GitHub**. OAuth stores the resulting
+   token in the local SQLite database.
+
+When using `GITHUB_PAT`, the app only reads repositories that you add in
+**Settings** as `owner/repo`; it does not auto-discover or sync every repository
+the token can access.
+
+For a fine-grained PAT:
+
+- Set **Repository access** to **Only selected repositories**.
+- Select the repositories you plan to add in Git Pulse.
+- Set repository **Pull requests** permission to **Read**.
+- Leave other repository permissions unset. **Metadata: Read** is included
+  automatically by GitHub for selected repositories.
+
 ## What it tracks
 
 - **Team Throughput** — weekly PRs merged, lines of code, PRs per contributor

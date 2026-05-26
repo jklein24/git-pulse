@@ -1,8 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
-import { eq, sql } from "drizzle-orm";
+import { eq } from "drizzle-orm";
 import { getDb } from "@/lib/db";
-import { users, settings, claudeCodeUsage } from "@/lib/db/schema";
+import { users, claudeCodeUsage } from "@/lib/db/schema";
 import { remapClaudeUsageUsers } from "@/lib/claude/sync";
+import { getGitHubToken } from "@/lib/github/auth";
 
 export async function GET() {
   const db = getDb();
@@ -54,9 +55,9 @@ export async function POST(request: NextRequest) {
   const body = await request.json();
 
   if (body.action === "auto-detect") {
-    const tokenRow = await db.select().from(settings).where(eq(settings.key, "github_pat")).get();
-    if (!tokenRow?.value) {
-      return NextResponse.json({ error: "GitHub not connected — sign in via Settings" }, { status: 400 });
+    const githubToken = await getGitHubToken();
+    if (!githubToken) {
+      return NextResponse.json({ error: "GitHub not connected — sign in via Settings or set GITHUB_PAT" }, { status: 400 });
     }
 
     const allUsers = await db.select().from(users);
@@ -66,7 +67,7 @@ export async function POST(request: NextRequest) {
       if (user.email) continue;
       try {
         const res = await fetch(`https://api.github.com/users/${user.githubLogin}`, {
-          headers: { Authorization: `token ${tokenRow.value}` },
+          headers: { Authorization: `token ${githubToken.token}` },
         });
         if (res.ok) {
           const data = await res.json();
