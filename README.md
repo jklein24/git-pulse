@@ -42,6 +42,19 @@ For a fine-grained PAT:
 - Leave other repository permissions unset. **Metadata: Read** is included
   automatically by GitHub for selected repositories.
 
+### Weekly AI summaries
+
+Weekly summaries require an Anthropic API key. Configure it in either place:
+
+1. Set `ANTHROPIC_API_KEY` in `.env.local` and restart the dev server:
+
+   ```bash
+   ANTHROPIC_API_KEY=sk-ant-...
+   ```
+
+2. Enter the API key in **Settings** under **Claude Code Analytics**. The
+   Settings value takes precedence over `.env.local` when both are present.
+
 ## What it tracks
 
 - **Team Throughput** — weekly PRs merged, lines of code, PRs per contributor
