@@ -4,7 +4,8 @@ import Anthropic from "@anthropic-ai/sdk";
 import { getDb } from "@/lib/db";
 import { settings } from "@/lib/db/schema";
 
-const client = new Anthropic();
+const MISSING_API_KEY_MESSAGE =
+  "Weekly summaries require an Anthropic API key. Add your API key in Settings under Claude Code Analytics, or set ANTHROPIC_API_KEY in .env.local and restart the dev server, then try generating the weekly summary again.";
 
 export async function POST(request: NextRequest) {
   const { weekStart, force } = await request.json();
@@ -20,6 +21,12 @@ export async function POST(request: NextRequest) {
     if (cached.length > 0 && cached[0].value) {
       return NextResponse.json({ summary: cached[0].value, cached: true });
     }
+  }
+
+  const apiKeyRow = await db.select().from(settings).where(eq(settings.key, "claude_admin_api_key")).get();
+  const apiKey = apiKeyRow?.value?.trim() || process.env.ANTHROPIC_API_KEY?.trim();
+  if (!apiKey) {
+    return NextResponse.json({ error: MISSING_API_KEY_MESSAGE }, { status: 400 });
   }
 
   const weekDetailUrl = new URL(`/api/metrics/week-detail?weekStart=${weekStart}`, request.url);
@@ -77,6 +84,7 @@ export async function POST(request: NextRequest) {
       }).join("\n");
 
   try {
+    const client = new Anthropic({ apiKey });
     const response = await client.messages.create({
       model: "claude-sonnet-4-6",
       max_tokens: 1500,
