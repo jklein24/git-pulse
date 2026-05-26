@@ -1,20 +1,31 @@
 import { NextRequest, NextResponse } from "next/server";
-import { eq } from "drizzle-orm";
 import { getDb } from "@/lib/db";
 import { settings } from "@/lib/db/schema";
 import { recomputeFilteredStats } from "@/lib/github/sync";
+import { maskToken } from "@/lib/github/auth";
 
 export async function GET() {
   const db = getDb();
   const rows = await db.select().from(settings);
   const MASKED_KEYS = new Set(["github_pat", "claude_admin_api_key"]);
   const result: Record<string, string | null> = {};
+  let hasDatabaseGitHubPat = false;
   for (const row of rows) {
     if (row.key === "oauth_state") continue;
+    if (row.key === "github_pat" && row.value) hasDatabaseGitHubPat = true;
     result[row.key] = MASKED_KEYS.has(row.key) && row.value
       ? `${"*".repeat(Math.max(0, row.value.length - 4))}${row.value.slice(-4)}`
       : row.value;
   }
+
+  const envGitHubPat = process.env.GITHUB_PAT?.trim();
+  if (hasDatabaseGitHubPat) {
+    result.github_auth_source = "database";
+  } else if (envGitHubPat) {
+    result.github_pat = maskToken(envGitHubPat);
+    result.github_auth_source = "environment";
+  }
+
   return NextResponse.json(result);
 }
 

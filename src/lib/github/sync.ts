@@ -1,6 +1,7 @@
-import { eq, and, sql } from "drizzle-orm";
+import { eq } from "drizzle-orm";
 import { getDb } from "../db";
 import { repos, users, pullRequests, prFiles, prReviews, syncJobs, settings } from "../db/schema";
+import { getGitHubToken } from "./auth";
 import { createGitHubClient, fetchPullRequests, fetchPRFiles, type PullRequestNode, type RateLimit } from "./client";
 import { transformPR, transformReview, isFileExcluded, computeFilteredStats, toUnix } from "./transforms";
 
@@ -162,10 +163,10 @@ export async function syncRepo(repoId: number, opts?: { backfill?: boolean }): P
 
   log(repoFullName, `Starting sync (${isInitialSync ? `initial, cutoff=${cutoffDate}` : "incremental"})`);
 
-  const tokenRow = await db.select().from(settings).where(eq(settings.key, "github_pat")).get();
-  if (!tokenRow?.value) throw new Error("GitHub not connected — sign in via Settings");
+  const githubToken = await getGitHubToken();
+  if (!githubToken) throw new Error("GitHub not connected — sign in via Settings or set GITHUB_PAT");
 
-  const client = createGitHubClient(tokenRow.value);
+  const client = createGitHubClient(githubToken.token);
   const excludeGlobs = await getExcludeGlobs();
   const cutoff = Math.floor(Date.now() / 1000) - ONE_YEAR_SEC;
 
