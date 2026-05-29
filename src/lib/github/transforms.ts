@@ -24,6 +24,7 @@ export function transformPR(pr: PullRequestNode) {
     publishedAt: getPublishedAt(pr),
     mergedAt: toUnix(pr.mergedAt),
     closedAt: toUnix(pr.closedAt),
+    githubUpdatedAt: toUnix(pr.updatedAt),
     additions: pr.additions,
     deletions: pr.deletions,
     changedFiles: pr.changedFiles,

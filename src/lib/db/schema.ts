@@ -40,6 +40,7 @@ export const pullRequests = sqliteTable("pull_requests", {
   publishedAt: integer("published_at"),
   mergedAt: integer("merged_at"),
   closedAt: integer("closed_at"),
+  githubUpdatedAt: integer("github_updated_at"),
   additions: integer("additions").default(0),
   deletions: integer("deletions").default(0),
   changedFiles: integer("changed_files").default(0),
@@ -53,6 +54,7 @@ export const pullRequests = sqliteTable("pull_requests", {
   index("pr_merged_at_idx").on(table.mergedAt),
   index("pr_state_idx").on(table.state),
   index("pr_published_at_idx").on(table.publishedAt),
+  index("pr_github_updated_at_idx").on(table.githubUpdatedAt),
 ]);
 
 export const prFiles = sqliteTable("pr_files", {
@@ -80,6 +82,7 @@ export const prReviews = sqliteTable("pr_reviews", {
   index("pr_reviews_pr_id_idx").on(table.prId),
   index("pr_reviews_reviewer_id_idx").on(table.reviewerId),
   index("pr_reviews_submitted_at_idx").on(table.submittedAt),
+  uniqueIndex("pr_reviews_github_id_idx").on(table.githubId),
 ]);
 
 export const syncJobs = sqliteTable("sync_jobs", {
