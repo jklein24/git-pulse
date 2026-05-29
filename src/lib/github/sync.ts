@@ -1,6 +1,7 @@
 import { eq, inArray } from "drizzle-orm";
 import { getDb } from "../db";
 import { repos, users, pullRequests, prFiles, prReviews, syncJobs, settings } from "../db/schema";
+import { getGitHubToken } from "./auth";
 import {
   createGitHubClient,
   fetchPullRequestDetails,
@@ -260,10 +261,10 @@ export async function syncRepo(repoId: number, opts?: { backfill?: boolean }): P
 
   log(repoFullName, `Starting sync (${syncMode})`);
 
-  const tokenRow = await db.select().from(settings).where(eq(settings.key, "github_pat")).get();
-  if (!tokenRow?.value) throw new Error("GitHub not connected — sign in via Settings");
+  const githubToken = await getGitHubToken();
+  if (!githubToken) throw new Error("GitHub not connected — sign in via Settings or set GITHUB_PAT");
 
-  const client = createGitHubClient(tokenRow.value);
+  const client = createGitHubClient(githubToken.token);
   const excludeGlobs = await getExcludeGlobs();
 
   if (excludeGlobs.length > 0) {
