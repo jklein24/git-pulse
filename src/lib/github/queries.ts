@@ -1,4 +1,4 @@
-export const PULL_REQUESTS_QUERY = `
+export const PULL_REQUESTS_PAGE_QUERY = `
   query($owner: String!, $name: String!, $cursor: String, $orderBy: IssueOrder!) {
     repository(owner: $owner, name: $name) {
       pullRequests(first: 100, after: $cursor, orderBy: $orderBy) {
@@ -7,6 +7,27 @@ export const PULL_REQUESTS_QUERY = `
           endCursor
         }
         nodes {
+          id
+          databaseId
+          number
+          state
+          createdAt
+          updatedAt
+        }
+      }
+    }
+    rateLimit {
+      cost
+      remaining
+      resetAt
+    }
+  }
+`;
+
+export const PULL_REQUEST_DETAILS_QUERY = `
+  query($ids: [ID!]!) {
+    nodes(ids: $ids) {
+      ... on PullRequest {
           id
           databaseId
           number
@@ -49,8 +70,16 @@ export const PULL_REQUESTS_QUERY = `
               }
             }
           }
+          files(first: 100) {
+            totalCount
+            nodes {
+              path
+              additions
+              deletions
+              changeType
+            }
+          }
           updatedAt
-        }
       }
     }
     rateLimit {

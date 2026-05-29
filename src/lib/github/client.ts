@@ -1,6 +1,6 @@
 import { graphql } from "@octokit/graphql";
 import { Octokit } from "@octokit/rest";
-import { PULL_REQUESTS_QUERY } from "./queries";
+import { PULL_REQUEST_DETAILS_QUERY, PULL_REQUESTS_PAGE_QUERY } from "./queries";
 
 export interface GitHubClient {
   graphql: typeof graphql;
@@ -11,6 +11,13 @@ export interface RateLimit {
   cost: number;
   remaining: number;
   resetAt: string;
+}
+
+export interface PRFile {
+  filename: string;
+  status: string;
+  additions: number;
+  deletions: number;
 }
 
 export function createGitHubClient(token: string): GitHubClient {
@@ -58,15 +65,38 @@ export interface PullRequestNode {
       } | null;
     }>;
   };
+  files: {
+    totalCount: number;
+    nodes: Array<{
+      path: string;
+      additions: number;
+      deletions: number;
+      changeType: string;
+    }>;
+  };
 }
 
-interface PullRequestsResponse {
+export interface PullRequestSummary {
+  id: string;
+  databaseId: number;
+  number: number;
+  state: "OPEN" | "MERGED" | "CLOSED";
+  createdAt: string;
+  updatedAt: string;
+}
+
+interface PullRequestsPageResponse {
   repository: {
     pullRequests: {
       pageInfo: { hasNextPage: boolean; endCursor: string };
-      nodes: PullRequestNode[];
+      nodes: PullRequestSummary[];
     };
   };
+  rateLimit: RateLimit;
+}
+
+interface PullRequestDetailsResponse {
+  nodes: Array<PullRequestNode | null>;
   rateLimit: RateLimit;
 }
 
@@ -93,18 +123,18 @@ async function withRetry<T>(label: string, fn: () => Promise<T>): Promise<T> {
   throw new Error("unreachable");
 }
 
-export async function fetchPullRequests(
+export async function fetchPullRequestPage(
   client: GitHubClient,
   owner: string,
   name: string,
   cursor?: string | null,
 ): Promise<{
-  prs: PullRequestNode[];
+  prs: PullRequestSummary[];
   pageInfo: { hasNextPage: boolean; endCursor: string };
   rateLimit: RateLimit;
 }> {
-  const result = await withRetry(`${owner}/${name} GraphQL`, async () => {
-    const res = await client.graphql<PullRequestsResponse>(PULL_REQUESTS_QUERY, {
+  const result = await withRetry(`${owner}/${name} PR page`, async () => {
+    const res = await client.graphql<PullRequestsPageResponse>(PULL_REQUESTS_PAGE_QUERY, {
       owner,
       name,
       cursor: cursor || null,
@@ -127,27 +157,31 @@ export async function fetchPullRequests(
   };
 }
 
+export async function fetchPullRequestDetails(
+  client: GitHubClient,
+  ids: string[],
+): Promise<{ prs: PullRequestNode[]; rateLimit: RateLimit }> {
+  if (ids.length === 0) {
+    throw new Error("fetchPullRequestDetails requires at least one id");
+  }
+
+  const result = await withRetry(`PR detail batch (${ids.length})`, () =>
+    client.graphql<PullRequestDetailsResponse>(PULL_REQUEST_DETAILS_QUERY, { ids }),
+  );
+
+  return {
+    prs: result.nodes.filter((node): node is PullRequestNode => node !== null),
+    rateLimit: result.rateLimit,
+  };
+}
+
 export async function fetchPRFiles(
   client: GitHubClient,
   owner: string,
   repo: string,
   prNumber: number,
-): Promise<
-  Array<{
-    filename: string;
-    status: string;
-    additions: number;
-    deletions: number;
-    patch?: string;
-  }>
-> {
-  const files: Array<{
-    filename: string;
-    status: string;
-    additions: number;
-    deletions: number;
-    patch?: string;
-  }> = [];
+): Promise<PRFile[]> {
+  const files: PRFile[] = [];
 
   let page = 1;
   while (true) {
@@ -167,7 +201,6 @@ export async function fetchPRFiles(
         status: f.status,
         additions: f.additions,
         deletions: f.deletions,
-        patch: f.patch,
       });
     }
 

@@ -1,10 +1,24 @@
-import { eq, and, sql } from "drizzle-orm";
+import { eq, inArray } from "drizzle-orm";
 import { getDb } from "../db";
 import { repos, users, pullRequests, prFiles, prReviews, syncJobs, settings } from "../db/schema";
-import { createGitHubClient, fetchPullRequests, fetchPRFiles, type PullRequestNode, type RateLimit } from "./client";
+import {
+  createGitHubClient,
+  fetchPullRequestDetails,
+  fetchPullRequestPage,
+  fetchPRFiles,
+  type PRFile,
+  type PullRequestNode,
+  type PullRequestSummary,
+  type RateLimit,
+} from "./client";
 import { transformPR, transformReview, isFileExcluded, computeFilteredStats, toUnix } from "./transforms";
 
 const ONE_YEAR_SEC = 365 * 24 * 60 * 60;
+const INCREMENTAL_OVERLAP_SEC = 6 * 60 * 60;
+const PR_LOG_INTERVAL = 50;
+const DETAIL_BATCH_SIZE = 25;
+
+type UserCache = Map<string, { id: number; avatarUrl: string | null }>;
 
 function log(repo: string, ...args: unknown[]) {
   const ts = new Date().toISOString().slice(11, 23);
@@ -18,6 +32,18 @@ function logRate(repo: string, rateLimit: RateLimit) {
   );
 }
 
+function formatUnix(ts: number): string {
+  return new Date(ts * 1000).toISOString();
+}
+
+function chunk<T>(items: T[], size: number): T[][] {
+  const chunks: T[][] = [];
+  for (let i = 0; i < items.length; i += size) {
+    chunks.push(items.slice(i, i + size));
+  }
+  return chunks;
+}
+
 async function getExcludeGlobs(): Promise<string[]> {
   const db = getDb();
   const row = await db.select().from(settings).where(eq(settings.key, "exclude_globs")).get();
@@ -29,18 +55,38 @@ async function getExcludeGlobs(): Promise<string[]> {
   }
 }
 
+async function loadUserCache(): Promise<UserCache> {
+  const db = getDb();
+  const rows = await db
+    .select({ id: users.id, githubLogin: users.githubLogin, avatarUrl: users.avatarUrl })
+    .from(users);
+
+  return new Map(rows.map((user) => [user.githubLogin, { id: user.id, avatarUrl: user.avatarUrl }]));
+}
+
 async function upsertUser(
   author: { login: string; databaseId?: number; avatarUrl?: string } | null,
+  userCache: UserCache,
 ): Promise<number | null> {
   if (!author) return null;
   const db = getDb();
   const now = Math.floor(Date.now() / 1000);
+
+  const cached = userCache.get(author.login);
+  if (cached) {
+    if (author.avatarUrl && author.avatarUrl !== cached.avatarUrl) {
+      await db.update(users).set({ avatarUrl: author.avatarUrl }).where(eq(users.id, cached.id));
+      cached.avatarUrl = author.avatarUrl;
+    }
+    return cached.id;
+  }
 
   const existing = await db.select().from(users).where(eq(users.githubLogin, author.login)).get();
   if (existing) {
     if (author.avatarUrl && author.avatarUrl !== existing.avatarUrl) {
       await db.update(users).set({ avatarUrl: author.avatarUrl }).where(eq(users.id, existing.id));
     }
+    userCache.set(author.login, { id: existing.id, avatarUrl: author.avatarUrl ?? existing.avatarUrl });
     return existing.id;
   }
 
@@ -51,7 +97,19 @@ async function upsertUser(
     firstSeenAt: now,
   }).returning({ id: users.id });
 
+  userCache.set(author.login, { id: result[0].id, avatarUrl: author.avatarUrl ?? null });
   return result[0].id;
+}
+
+function filesFromGraphQL(pr: PullRequestNode): PRFile[] | null {
+  if (pr.files.totalCount > pr.files.nodes.length) return null;
+
+  return pr.files.nodes.map((f) => ({
+    filename: f.path,
+    status: f.changeType.toLowerCase(),
+    additions: f.additions,
+    deletions: f.deletions,
+  }));
 }
 
 async function processPR(
@@ -62,12 +120,13 @@ async function processPR(
   client: ReturnType<typeof createGitHubClient>,
   excludeGlobs: string[],
   repoFullName: string,
+  userCache: UserCache,
+  existing: typeof pullRequests.$inferSelect | null,
+  logDetail: boolean,
 ): Promise<{ isNew: boolean; filesProcessed: number }> {
   const db = getDb();
-  const authorId = await upsertUser(pr.author);
+  const authorId = await upsertUser(pr.author, userCache);
   const transformed = transformPR(pr);
-
-  const existing = await db.select().from(pullRequests).where(eq(pullRequests.githubId, pr.databaseId)).get();
 
   let prId: number;
   const isNew = !existing;
@@ -88,23 +147,31 @@ async function processPR(
     prId = result[0].id;
   }
 
-  let newReviews = 0;
+  const reviewGithubIds = pr.reviews.nodes.map((review) => review.databaseId).filter((id): id is number => Boolean(id));
+  const existingReviewRows = reviewGithubIds.length > 0
+    ? await db
+      .select({ githubId: prReviews.githubId })
+      .from(prReviews)
+      .where(inArray(prReviews.githubId, reviewGithubIds))
+    : [];
+  const existingReviewIds = new Set(existingReviewRows.map((review) => review.githubId));
+  const reviewRows: Array<typeof prReviews.$inferInsert> = [];
+
   for (const review of pr.reviews.nodes) {
-    const reviewerId = await upsertUser(review.author);
+    if (existingReviewIds.has(review.databaseId)) continue;
+
+    const reviewerId = await upsertUser(review.author, userCache);
     const transformedReview = transformReview(review);
 
-    const existingReview = review.databaseId
-      ? await db.select().from(prReviews).where(eq(prReviews.githubId, review.databaseId)).get()
-      : null;
+    reviewRows.push({
+      prId,
+      reviewerId,
+      ...transformedReview,
+    });
+  }
 
-    if (!existingReview) {
-      await db.insert(prReviews).values({
-        prId,
-        reviewerId,
-        ...transformedReview,
-      });
-      newReviews++;
-    }
+  if (reviewRows.length > 0) {
+    await db.insert(prReviews).values(reviewRows).onConflictDoNothing({ target: prReviews.githubId });
   }
 
   let filesProcessed = 0;
@@ -112,7 +179,7 @@ async function processPR(
   if (needsFileSync) {
     await db.delete(prFiles).where(eq(prFiles.prId, prId));
 
-    const files = await fetchPRFiles(client, owner, repoName, pr.number);
+    const files = filesFromGraphQL(pr) ?? await fetchPRFiles(client, owner, repoName, pr.number);
     filesProcessed = files.length;
     const fileRows = files.map((f) => ({
       prId,
@@ -121,7 +188,7 @@ async function processPR(
       additions: f.additions,
       deletions: f.deletions,
       isExcluded: isFileExcluded(f.filename, excludeGlobs),
-      patch: f.patch ?? null,
+      patch: null,
     }));
 
     if (fileRows.length > 0) {
@@ -137,17 +204,38 @@ async function processPR(
     await db.update(pullRequests).set(stats).where(eq(pullRequests.id, prId));
   }
 
-  log(
-    repoFullName,
-    `  PR #${pr.number} [${transformed.state}]`,
-    `by ${pr.author?.login ?? "unknown"}`,
-    isNew ? "(new)" : "(updated)",
-    `reviews=${pr.reviews.nodes.length} (${newReviews} new)`,
-    needsFileSync ? `files=${filesProcessed}` : "(files skipped)",
-    `+${pr.additions}/-${pr.deletions}`,
-  );
+  if (logDetail) {
+    log(
+      repoFullName,
+      `  PR #${pr.number} [${transformed.state}]`,
+      `by ${pr.author?.login ?? "unknown"}`,
+      isNew ? "(new)" : "(updated)",
+      `reviews=${pr.reviews.nodes.length} (${reviewRows.length} new)`,
+      needsFileSync ? `files=${filesProcessed}` : "(files skipped)",
+      `+${pr.additions}/-${pr.deletions}`,
+    );
+  }
 
   return { isNew, filesProcessed };
+}
+
+async function fetchDetailsById(
+  client: ReturnType<typeof createGitHubClient>,
+  repoFullName: string,
+  ids: string[],
+): Promise<Map<string, PullRequestNode>> {
+  const details = new Map<string, PullRequestNode>();
+
+  for (const batch of chunk(ids, DETAIL_BATCH_SIZE)) {
+    const { prs, rateLimit } = await fetchPullRequestDetails(client, batch);
+    for (const pr of prs) {
+      details.set(pr.id, pr);
+    }
+    log(repoFullName, `Fetched details for ${prs.length}/${batch.length} PRs`);
+    logRate(repoFullName, rateLimit);
+  }
+
+  return details;
 }
 
 export async function syncRepo(repoId: number, opts?: { backfill?: boolean }): Promise<void> {
@@ -156,18 +244,27 @@ export async function syncRepo(repoId: number, opts?: { backfill?: boolean }): P
   if (!repo) throw new Error(`Repo ${repoId} not found`);
 
   const repoFullName = repo.fullName;
-  const isInitialSync = !repo.lastSyncedAt;
+  const previousSyncAt = repo.lastSyncedAt;
+  const isInitialSync = !previousSyncAt;
   const backfill = opts?.backfill ?? false;
-  const cutoffDate = new Date((Math.floor(Date.now() / 1000) - ONE_YEAR_SEC) * 1000).toISOString().slice(0, 10);
+  const syncStartedAt = Math.floor(Date.now() / 1000);
+  const cutoff = syncStartedAt - ONE_YEAR_SEC;
+  const incrementalStopAt = previousSyncAt && !backfill
+    ? Math.max(cutoff, previousSyncAt - INCREMENTAL_OVERLAP_SEC)
+    : cutoff;
+  const syncMode = backfill
+    ? `backfill, cutoff=${formatUnix(cutoff).slice(0, 10)}`
+    : isInitialSync
+      ? `initial, cutoff=${formatUnix(cutoff).slice(0, 10)}`
+      : `incremental, since=${formatUnix(incrementalStopAt)}`;
 
-  log(repoFullName, `Starting sync (${isInitialSync ? `initial, cutoff=${cutoffDate}` : "incremental"})`);
+  log(repoFullName, `Starting sync (${syncMode})`);
 
   const tokenRow = await db.select().from(settings).where(eq(settings.key, "github_pat")).get();
   if (!tokenRow?.value) throw new Error("GitHub not connected — sign in via Settings");
 
   const client = createGitHubClient(tokenRow.value);
   const excludeGlobs = await getExcludeGlobs();
-  const cutoff = Math.floor(Date.now() / 1000) - ONE_YEAR_SEC;
 
   if (excludeGlobs.length > 0) {
     log(repoFullName, `Exclude globs: ${excludeGlobs.join(", ")}`);
@@ -176,7 +273,7 @@ export async function syncRepo(repoId: number, opts?: { backfill?: boolean }): P
   const job = await db.insert(syncJobs).values({
     repoId,
     status: "RUNNING",
-    startedAt: Math.floor(Date.now() / 1000),
+    startedAt: syncStartedAt,
     prsProcessed: 0,
   }).returning({ id: syncJobs.id });
   const jobId = job[0].id;
@@ -187,47 +284,63 @@ export async function syncRepo(repoId: number, opts?: { backfill?: boolean }): P
     let totalNew = 0;
     let totalUpdated = 0;
     let totalSkipped = 0;
+    let totalSkippedMerged = 0;
+    let totalUnchanged = 0;
     let totalFiles = 0;
     let pageNum = 0;
     let consecutiveMerged = 0;
     let done = false;
+    const userCache = await loadUserCache();
 
     while (!done) {
       pageNum++;
-      const { prs, pageInfo, rateLimit } = await fetchPullRequests(client, repo.owner, repo.name, cursor);
+      const { prs: summaries, pageInfo, rateLimit } = await fetchPullRequestPage(client, repo.owner, repo.name, cursor);
+      const existingPrs = summaries.length > 0
+        ? await db.select().from(pullRequests).where(inArray(pullRequests.githubId, summaries.map((pr) => pr.databaseId)))
+        : [];
+      const existingByGithubId = new Map(existingPrs.map((pr) => [pr.githubId, pr]));
 
-      const oldest = prs.length > 0 ? prs[prs.length - 1].updatedAt : "n/a";
-      const newest = prs.length > 0 ? prs[0].updatedAt : "n/a";
+      const oldest = summaries.length > 0 ? summaries[summaries.length - 1].updatedAt : "n/a";
+      const newest = summaries.length > 0 ? summaries[0].updatedAt : "n/a";
       log(
         repoFullName,
-        `Page ${pageNum}: ${prs.length} PRs`,
+        `Page ${pageNum}: ${summaries.length} PR summaries`,
         `(newest=${newest.slice(0, 10)}, oldest=${oldest.slice(0, 10)})`,
         `hasMore=${pageInfo.hasNextPage}`,
       );
       logRate(repoFullName, rateLimit);
 
-      for (const pr of prs) {
-        const updatedAt = toUnix(pr.updatedAt);
-        if (updatedAt && updatedAt < cutoff) {
-          log(repoFullName, `Reached cutoff at PR #${pr.number} (updatedAt=${pr.updatedAt.slice(0, 10)}). Stopping.`);
+      const detailCandidates: Array<{
+        summary: PullRequestSummary;
+        existing: typeof pullRequests.$inferSelect | null;
+      }> = [];
+
+      for (const summary of summaries) {
+        const updatedAt = toUnix(summary.updatedAt);
+        if (updatedAt && updatedAt < incrementalStopAt) {
+          log(repoFullName, `Reached sync window at PR #${summary.number} (updatedAt=${summary.updatedAt.slice(0, 10)}). Stopping.`);
           done = true;
           break;
         }
 
-        const createdAt = toUnix(pr.createdAt);
+        const createdAt = toUnix(summary.createdAt);
         if (backfill && createdAt && createdAt < cutoff) {
           totalSkipped++;
           continue;
         }
 
-        const existing = await db.select({ state: pullRequests.state })
-          .from(pullRequests)
-          .where(eq(pullRequests.githubId, pr.databaseId))
-          .get();
+        const existing = existingByGithubId.get(summary.databaseId) ?? null;
+        if (!backfill && existing?.githubUpdatedAt && updatedAt && existing.githubUpdatedAt >= updatedAt) {
+          totalSkipped++;
+          totalUnchanged++;
+          continue;
+        }
+
         if (existing?.state === "MERGED") {
           consecutiveMerged++;
           totalSkipped++;
-          if (!backfill && consecutiveMerged >= 10) {
+          totalSkippedMerged++;
+          if (!backfill && isInitialSync && consecutiveMerged >= 10) {
             log(repoFullName, `Hit ${consecutiveMerged} consecutive already-merged PRs. Stopping early.`);
             done = true;
             break;
@@ -236,7 +349,34 @@ export async function syncRepo(repoId: number, opts?: { backfill?: boolean }): P
         }
         consecutiveMerged = 0;
 
-        const result = await processPR(pr, repoId, repo.owner, repo.name, client, excludeGlobs, repoFullName);
+        detailCandidates.push({ summary, existing });
+      }
+
+      const detailsById = detailCandidates.length > 0
+        ? await fetchDetailsById(client, repoFullName, detailCandidates.map((candidate) => candidate.summary.id))
+        : new Map<string, PullRequestNode>();
+
+      for (const { summary, existing } of detailCandidates) {
+        const pr = detailsById.get(summary.id);
+        if (!pr) {
+          totalSkipped++;
+          log(repoFullName, `  PR #${summary.number}: detail fetch returned no node, skipped`);
+          continue;
+        }
+
+        const logDetail = totalProcessed < 10 || (totalProcessed + 1) % PR_LOG_INTERVAL === 0;
+        const result = await processPR(
+          pr,
+          repoId,
+          repo.owner,
+          repo.name,
+          client,
+          excludeGlobs,
+          repoFullName,
+          userCache,
+          existing,
+          logDetail,
+        );
         totalProcessed++;
         if (result.isNew) totalNew++;
         else totalUpdated++;
@@ -244,6 +384,17 @@ export async function syncRepo(repoId: number, opts?: { backfill?: boolean }): P
       }
 
       await db.update(syncJobs).set({ prsProcessed: totalProcessed }).where(eq(syncJobs.id, jobId));
+      log(
+        repoFullName,
+        `Page ${pageNum} processed: total=${totalProcessed}`,
+        `new=${totalNew}`,
+        `updated=${totalUpdated}`,
+        `skipped=${totalSkipped}`,
+        `unchanged=${totalUnchanged}`,
+        `merged-skipped=${totalSkippedMerged}`,
+        `details=${detailCandidates.length}`,
+        `files=${totalFiles}`,
+      );
 
       if (!pageInfo.hasNextPage) {
         log(repoFullName, "Reached last page of results.");
@@ -253,9 +404,14 @@ export async function syncRepo(repoId: number, opts?: { backfill?: boolean }): P
     }
 
     const now = Math.floor(Date.now() / 1000);
-    const elapsed = now - (await db.select().from(syncJobs).where(eq(syncJobs.id, jobId)).get())!.startedAt;
+    const elapsed = now - syncStartedAt;
 
-    log(repoFullName, `Sync complete in ${elapsed}s: ${totalProcessed} PRs (${totalNew} new, ${totalUpdated} updated, ${totalSkipped} skipped-merged), ${totalFiles} files fetched`);
+    log(
+      repoFullName,
+      `Sync complete in ${elapsed}s: ${totalProcessed} PRs`,
+      `(${totalNew} new, ${totalUpdated} updated, ${totalSkipped} skipped, ${totalUnchanged} unchanged, ${totalSkippedMerged} skipped-merged),`,
+      `${totalFiles} files fetched`,
+    );
 
     await db.update(syncJobs).set({
       status: "COMPLETED",
@@ -263,7 +419,7 @@ export async function syncRepo(repoId: number, opts?: { backfill?: boolean }): P
       prsProcessed: totalProcessed,
     }).where(eq(syncJobs.id, jobId));
 
-    await db.update(repos).set({ lastSyncedAt: now }).where(eq(repos.id, repoId));
+    await db.update(repos).set({ lastSyncedAt: syncStartedAt }).where(eq(repos.id, repoId));
   } catch (error: unknown) {
     const msg = error instanceof Error ? error.message : "Unknown error";
     log(repoFullName, `Sync FAILED: ${msg}`);
@@ -293,7 +449,9 @@ export async function recomputeFilteredStats(): Promise<void> {
   const excludeGlobs = await getExcludeGlobs();
 
   if (excludeGlobs.length > 0) {
-    const allFiles = await db.select().from(prFiles);
+    const allFiles = await db
+      .select({ id: prFiles.id, filename: prFiles.filename, isExcluded: prFiles.isExcluded })
+      .from(prFiles);
     for (const file of allFiles) {
       const excluded = isFileExcluded(file.filename, excludeGlobs);
       if (excluded !== file.isExcluded) {
@@ -306,7 +464,10 @@ export async function recomputeFilteredStats(): Promise<void> {
 
   const prs = await db.select({ id: pullRequests.id }).from(pullRequests);
   for (const pr of prs) {
-    const files = await db.select().from(prFiles).where(eq(prFiles.prId, pr.id));
+    const files = await db
+      .select({ additions: prFiles.additions, deletions: prFiles.deletions, isExcluded: prFiles.isExcluded })
+      .from(prFiles)
+      .where(eq(prFiles.prId, pr.id));
     const stats = computeFilteredStats(files);
     await db.update(pullRequests).set(stats).where(eq(pullRequests.id, pr.id));
   }

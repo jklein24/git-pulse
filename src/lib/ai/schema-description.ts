@@ -30,6 +30,7 @@ The SQLite database has the following tables:
    - published_at: integer (unix timestamp, nullable — when draft was marked ready)
    - merged_at: integer (unix timestamp, nullable)
    - closed_at: integer (unix timestamp, nullable)
+   - github_updated_at: integer (unix timestamp, nullable — GitHub's remote PR updatedAt)
    - additions: integer (raw line additions)
    - deletions: integer (raw line deletions)
    - changed_files: integer
@@ -45,7 +46,7 @@ The SQLite database has the following tables:
    - additions: integer
    - deletions: integer
    - is_excluded: integer (0 or 1 — whether this file is excluded by glob patterns)
-   - patch: text (nullable, diff patch)
+   - patch: text (nullable, not populated for new syncs)
 
 5. pr_reviews
    - id: integer (primary key, auto-increment)
