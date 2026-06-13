@@ -5,7 +5,7 @@ import { getDb } from "@/lib/db";
 import { settings } from "@/lib/db/schema";
 
 const MISSING_API_KEY_MESSAGE =
-  "Weekly summaries require an Anthropic API key. Add your API key in Settings under Claude Code Analytics, or set ANTHROPIC_API_KEY in .env.local and restart the dev server, then try generating the weekly summary again.";
+  "Weekly summaries require a standard Anthropic API key (sk-ant-api...). Set ANTHROPIC_API_KEY in .env.local and restart the dev server, then try generating the weekly summary again. Note: the Admin API key in Settings is only for Claude Code usage syncing and cannot generate summaries.";
 
 export async function POST(request: NextRequest) {
   const { weekStart, force } = await request.json();
@@ -23,8 +23,9 @@ export async function POST(request: NextRequest) {
     }
   }
 
-  const apiKeyRow = await db.select().from(settings).where(eq(settings.key, "claude_admin_api_key")).get();
-  const apiKey = apiKeyRow?.value?.trim() || process.env.ANTHROPIC_API_KEY?.trim();
+  // The Messages API requires a standard key (sk-ant-api...). The Admin key stored
+  // in settings only works for the usage-report endpoint, so we use the env var here.
+  const apiKey = process.env.ANTHROPIC_API_KEY?.trim();
   if (!apiKey) {
     return NextResponse.json({ error: MISSING_API_KEY_MESSAGE }, { status: 400 });
   }
