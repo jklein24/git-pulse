@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { useParams } from "next/navigation";
+import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
 import ReactMarkdown from "react-markdown";
 import PrsByRepoChart from "@/components/charts/PrsByRepoChart";
@@ -44,6 +44,7 @@ function rankBadge(index: number): React.ReactNode {
 
 export default function WeekDetailPage() {
   const params = useParams<{ weekStart: string }>();
+  const router = useRouter();
   const weekStart = Number(params.weekStart);
   const [prs, setPrs] = useState<WeekPR[]>([]);
   const [leaderboard, setLeaderboard] = useState<LeaderboardEntry[]>([]);
@@ -200,7 +201,8 @@ export default function WeekDetailPage() {
                   {leaderboard.map((entry, idx) => (
                     <tr
                       key={entry.login}
-                      className="border-b border-border/40 hover:bg-bg-tertiary/50 transition-colors"
+                      onClick={() => router.push(`/person/${entry.login}`)}
+                      className="border-b border-border/40 hover:bg-bg-tertiary/50 transition-colors cursor-pointer"
                     >
                       <td className="px-4 py-3">{rankBadge(idx)}</td>
                       <td className="px-4 py-3">
