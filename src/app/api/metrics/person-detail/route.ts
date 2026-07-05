@@ -52,16 +52,18 @@ export async function GET(request: NextRequest) {
   const weeklyReviews = await db
     .select({
       week: sql<number>`((${prReviews.submittedAt} + ${MONDAY_OFFSET}) - ((${prReviews.submittedAt} + ${MONDAY_OFFSET}) % 604800)) - ${MONDAY_OFFSET}`.as("week"),
-      count: sql<number>`count(*)`.as("count"),
+      count: sql<number>`count(distinct ${prReviews.prId})`.as("count"),
     })
     .from(prReviews)
     .innerJoin(users, eq(prReviews.reviewerId, users.id))
+    .innerJoin(pullRequests, eq(prReviews.prId, pullRequests.id))
     .where(
       and(
         eq(users.githubLogin, login),
         isNotNull(prReviews.submittedAt),
         gte(prReviews.submittedAt, startDate),
         lte(prReviews.submittedAt, endDate),
+        sql`(${pullRequests.authorId} IS NULL OR ${pullRequests.authorId} <> ${prReviews.reviewerId})`,
       ),
     )
     .groupBy(sql`week`)
