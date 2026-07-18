@@ -5,6 +5,7 @@ import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
 import ReactMarkdown from "react-markdown";
 import PrsByRepoChart from "@/components/charts/PrsByRepoChart";
+import WeekStatsBlurb from "@/components/WeekStatsBlurb";
 import { useSettings } from "@/components/layout/SettingsContext";
 
 interface WeekPR {
@@ -124,6 +125,8 @@ export default function WeekDetailPage() {
           {prs.length} PRs merged
         </span>
       </div>
+
+      <WeekStatsBlurb weekStart={weekStart} />
 
       <section>
         <div className="flex items-center justify-between mb-3">
