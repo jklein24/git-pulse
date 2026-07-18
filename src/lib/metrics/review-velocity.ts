@@ -1,7 +1,7 @@
-import { sql, and, gte, lte, eq, isNotNull, ne } from "drizzle-orm";
+import { and, gte, lte, eq, isNotNull } from "drizzle-orm";
 import { getDb } from "../db";
 import { pullRequests, prReviews, users } from "../db/schema";
-import { median, formatDate, hoursFromSeconds, MONDAY_OFFSET } from "./utils";
+import { median, formatDate, hoursFromSeconds, MONDAY_OFFSET, isBotLogin } from "./utils";
 
 export async function getReviewVelocityTrend(startDate: number, endDate: number) {
   const db = getDb();
@@ -34,11 +34,10 @@ export async function getReviewVelocityTrend(startDate: number, endDate: number)
     .where(isNotNull(prReviews.submittedAt))
     .orderBy(prReviews.submittedAt);
 
-  const botPattern = /(-bot|bot)$|-apps?$/i;
   const reviewsByPr: Record<number, Array<{ reviewerId: number | null; submittedAt: number }>> = {};
   for (const r of reviews) {
     if (!r.submittedAt) continue;
-    if (botPattern.test(r.reviewerLogin)) continue;
+    if (isBotLogin(r.reviewerLogin)) continue;
     if (!reviewsByPr[r.prId]) reviewsByPr[r.prId] = [];
     reviewsByPr[r.prId].push({ reviewerId: r.reviewerId, submittedAt: r.submittedAt });
   }

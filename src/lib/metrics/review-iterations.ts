@@ -1,7 +1,7 @@
 import { and, gte, lte, eq, isNotNull } from "drizzle-orm";
 import { getDb } from "../db";
 import { pullRequests, prReviews, users } from "../db/schema";
-import { median, formatDate, MONDAY_OFFSET } from "./utils";
+import { median, formatDate, MONDAY_OFFSET, isBotLogin } from "./utils";
 
 export async function getReviewIterationsTrend(startDate: number, endDate: number) {
   const db = getDb();
@@ -32,10 +32,9 @@ export async function getReviewIterationsTrend(startDate: number, endDate: numbe
     .innerJoin(users, eq(prReviews.reviewerId, users.id))
     .where(isNotNull(prReviews.submittedAt));
 
-  const botPattern = /(-bot|bot)$|-apps?$/i;
   const reviewCountByPr: Record<number, number> = {};
   for (const r of reviews) {
-    if (botPattern.test(r.reviewerLogin)) continue;
+    if (isBotLogin(r.reviewerLogin)) continue;
     reviewCountByPr[r.prId] = (reviewCountByPr[r.prId] || 0) + 1;
   }
 

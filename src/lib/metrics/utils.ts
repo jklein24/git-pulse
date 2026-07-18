@@ -1,3 +1,19 @@
+import { sql, type SQL, type AnyColumn } from "drizzle-orm";
+
+// Logins for bots/apps that submit automated reviews (e.g. greptile-apps, restamp-bot,
+// graphite-app). Excluded from human review metrics. The JS predicate and SQL condition
+// below are two encodings of the same rule — "login ends in 'bot', '-app', or '-apps'" —
+// and must stay in sync.
+export const BOT_LOGIN_PATTERN = /(-bot|bot)$|-apps?$/i;
+
+export function isBotLogin(login: string): boolean {
+  return BOT_LOGIN_PATTERN.test(login);
+}
+
+export function notBotLoginSql(loginColumn: AnyColumn): SQL {
+  return sql`lower(${loginColumn}) NOT LIKE '%bot' AND lower(${loginColumn}) NOT LIKE '%-app' AND lower(${loginColumn}) NOT LIKE '%-apps'`;
+}
+
 export function stddev(values: number[]): number {
   if (values.length === 0) return 0;
   const mean = values.reduce((a, b) => a + b, 0) / values.length;

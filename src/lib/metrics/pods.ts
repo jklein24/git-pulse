@@ -63,17 +63,22 @@ export async function getPodHealth(startDate: number, endDate: number): Promise<
 
   const prMap = new Map(prsByUser.map((r) => [r.authorId, { count: r.prCount, lines: (r.additions ?? 0) + (r.deletions ?? 0) }]));
 
-  // Reviews given per user in period
+  // Reviews given per user in period: distinct PRs reviewed (not raw review events),
+  // excluding self-authored PRs. Bots have no pod assignment, so they're already
+  // dropped when reviewMap is read against pod members below.
   const reviewsByUser = await db
     .select({
       reviewerId: prReviews.reviewerId,
-      reviewCount: sql<number>`count(*)`.as("review_count"),
+      reviewCount: sql<number>`count(distinct ${prReviews.prId})`.as("review_count"),
     })
     .from(prReviews)
+    .innerJoin(pullRequests, eq(prReviews.prId, pullRequests.id))
     .where(
       and(
+        isNotNull(prReviews.submittedAt),
         gte(prReviews.submittedAt, startDate),
         lte(prReviews.submittedAt, endDate),
+        sql`(${pullRequests.authorId} IS NULL OR ${pullRequests.authorId} <> ${prReviews.reviewerId})`,
       ),
     )
     .groupBy(prReviews.reviewerId);
