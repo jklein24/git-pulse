@@ -10,6 +10,7 @@ import MetricCard from "@/components/layout/MetricCard";
 import ThroughputChart from "@/components/charts/ThroughputChart";
 import TrueThroughputChart from "@/components/charts/TrueThroughputChart";
 import InfoTooltip from "@/components/layout/InfoTooltip";
+import WeekStatsBlurb from "@/components/WeekStatsBlurb";
 import Link from "next/link";
 
 interface ThroughputData {
@@ -192,6 +193,9 @@ export default function DashboardPage() {
               Regenerate
             </button>
           )}
+        </div>
+        <div className="mb-3">
+          <WeekStatsBlurb weekStart={currentWeekStart} />
         </div>
         {summaryLoading ? (
           <div className="bg-bg-secondary rounded-xl border border-border p-5">
